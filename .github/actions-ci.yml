@@ -1,0 +1,123 @@
+# .github/workflows/plan.yml
+
+name: terraform plan
+
+on:
+  pull_request:
+    branches: [test]
+    paths:
+      - 'accounts/**'
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      folders:     ${{ steps.get-folders.outputs.folders }}
+      any_changed: ${{ steps.changed-files.outputs.any_changed }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v47
+        with:
+          files: accounts/**
+
+      - name: get changed folders
+        id: get-folders
+        run: |
+          FOLDERS=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" \
+            | tr ' ' '\n' \
+            | xargs -I {} dirname {} \
+            | sort -u \
+            | jq -R -s -c 'split("\n") | map(select(length > 0))')
+
+          echo "changed folders: $FOLDERS"
+          echo "folders=$FOLDERS" >> $GITHUB_OUTPUT
+
+  plan:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: needs.detect-changes.outputs.any_changed == 'true'
+
+    strategy:
+      matrix:
+        folder: ${{ fromJson(needs.detect-changes.outputs.folders) }}
+      max-parallel: 1
+
+    steps:
+      - uses: actions/checkout@v3
+
+      # ── configure aws ──
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          role-to-assume:        ${{ secrets.AWS_IAM_ROLE_ARN_DEV }}
+          aws-region:            us-east-1
+          role-duration-seconds: 3600
+
+      # ── setup terraform >= 1.10 for s3 native locking ──
+      - name: setup terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.0
+
+      # ── init with s3 native locking ──
+      - name: terraform init
+        run: |
+          terraform -chdir=${{ matrix.folder }} init -reconfigure
+            
+      # ── plan ──
+      - name: terraform plan
+        id: plan
+        run: |
+          terraform -chdir=${{ matrix.folder }} plan \
+            -var-file=environments/dev.tfvars \
+            -no-color 2>&1 | tee plan_output.txt
+
+          PLAN=$(cat plan_output.txt)
+          echo "output<<EOF" >> $GITHUB_OUTPUT
+          echo "$PLAN"       >> $GITHUB_OUTPUT
+          echo "EOF"         >> $GITHUB_OUTPUT
+        env:
+          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN_DEV }}
+          TF_VAR_environment: dev
+          TF_VAR_aws_region:  us-east-2
+        continue-on-error: true
+
+      # ── post plan to PR ──
+      - name: post plan comment
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const folder  = "${{ matrix.folder }}";
+            const plan    = `${{ steps.plan.outputs.output }}`;
+            const status  = "${{ steps.plan.outcome }}" === "success" ? "✅" : "❌";
+
+            const body = `
+            ### ${status} Terraform Plan — \`${folder}\`
+
+            <details>
+            <summary>Click to see plan</summary>
+
+            \`\`\`hcl
+            ${plan}
+            \`\`\`
+
+            </details>
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              body:         body
+            });
+
+      # ── fail if plan failed ──
+      - name: check plan status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
