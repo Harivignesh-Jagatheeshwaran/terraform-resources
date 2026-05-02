@@ -40,11 +40,11 @@ jobs:
         run: |
           FILES="${{ steps.changed-files.outputs.all_changed_files }}"
 
-          # extract unique module-level folders
-          # handles both accounts/{env}/{region}/{module}
-          # and     accounts/{env}/{region}/{module}/{submodule}
+          # convert file paths to their parent directories first
+          # then extract unique module-level folder paths
           ALL=$(echo "$FILES" \
             | tr ' ' '\n' \
+            | xargs -I {} dirname {} \
             | grep -oP '^accounts/[^/]+/[^/]+/[^/]+(/[^/]+)?' \
             | sort -u)
 
@@ -63,7 +63,6 @@ jobs:
                 done \
               | jq -sc '.')
 
-            # if grep finds nothing, result will be empty — default to []
             echo "${result:-[]}"
           }
 
