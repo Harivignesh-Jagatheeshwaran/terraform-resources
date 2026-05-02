@@ -10,9 +10,9 @@ on:
       - 'accounts/**'
 
 permissions:
-      id-token: write
-      contents: read
-      pull-requests: write 
+  id-token: write
+  contents: read
+  pull-requests: write
 
 jobs:
   detect-changes:
@@ -40,23 +40,31 @@ jobs:
         run: |
           FILES="${{ steps.changed-files.outputs.all_changed_files }}"
 
-          # extract unique accounts/{env}/{region} paths from changed files
+          # extract unique module-level folders
+          # handles both accounts/{env}/{region}/{module}
+          # and     accounts/{env}/{region}/{module}/{submodule}
           ALL=$(echo "$FILES" \
             | tr ' ' '\n' \
-            | grep -oP '^accounts/[^/]+/[^/]+' \
+            | grep -oP '^accounts/[^/]+/[^/]+/[^/]+(/[^/]+)?' \
             | sort -u)
 
-          echo "Unique changed paths: $ALL"
+          echo "Unique changed module paths:"
+          echo "$ALL"
 
-          # build per-env matrices
           build_matrix() {
             local env=$1
-            echo "$ALL" \
+            local result
+
+            result=$(echo "$ALL" \
               | grep "^accounts/$env/" \
-              | while IFS='/' read -r _ e region; do
-                  echo "{\"environment\":\"$e\",\"region\":\"$region\",\"folder\":\"accounts/$e/$region\"}"
+              | while read -r folder; do
+                  region=$(echo "$folder" | cut -d'/' -f3)
+                  echo "{\"environment\":\"$env\",\"region\":\"$region\",\"folder\":\"$folder\"}"
                 done \
-              | jq -sc '.'
+              | jq -sc '.')
+
+            # if grep finds nothing, result will be empty — default to []
+            echo "${result:-[]}"
           }
 
           DEV_MATRIX=$(build_matrix dev)
@@ -67,10 +75,13 @@ jobs:
           echo "matrix_stg=$STG_MATRIX"   >> $GITHUB_OUTPUT
           echo "matrix_prod=$PROD_MATRIX" >> $GITHUB_OUTPUT
 
-          # has_* flags — true only if matrix is non-empty
-          echo "has_dev=$([[ "$DEV_MATRIX" != "[]" ]]   && echo true || echo false)" >> $GITHUB_OUTPUT
-          echo "has_stg=$([[ "$STG_MATRIX" != "[]" ]]   && echo true || echo false)" >> $GITHUB_OUTPUT
-          echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]]  && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "Dev matrix:  $DEV_MATRIX"
+          echo "Stg matrix:  $STG_MATRIX"
+          echo "Prod matrix: $PROD_MATRIX"
+
+          echo "has_dev=$([[ "$DEV_MATRIX"  != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_stg=$([[ "$STG_MATRIX"  != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
   plan-dev:
     needs: detect-changes

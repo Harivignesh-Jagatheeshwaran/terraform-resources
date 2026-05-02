@@ -1,19 +1,24 @@
-# .github/workflows/_plan.yml
+# .github/workflows/terraform_plan_template.yml
 
 on:
   workflow_call:
     inputs:
       matrix:
         required: true
-        type: string          # JSON string of matrix items
+        type: string
       environment:
         required: true
-        type: string          # used to set the GitHub Environment
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
 
 jobs:
   plan:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}    # ← GitHub Environment for secret scoping
+    environment: ${{ inputs.environment }}
 
     strategy:
       fail-fast: false
@@ -43,7 +48,6 @@ jobs:
         id: plan
         run: |
           terraform -chdir=${{ matrix.folder }} plan \
-            -var-file=environments/${{ inputs.environment }}.tfvars \
             -no-color 2>&1 | tee plan_output.txt
 
           PLAN=$(cat plan_output.txt)
@@ -85,6 +89,8 @@ jobs:
             </details>
             `;
 
+            // update existing comment if already posted for this folder
+            // avoids stacking multiple comments on same PR for repeated pushes
             const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
               owner:        context.repo.owner,
