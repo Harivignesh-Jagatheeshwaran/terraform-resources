@@ -1,10 +1,11 @@
 # .github/workflows/plan.yml
 
-name: terraform plan
+name: Terraform Plan
+run-name: Terraform Plan — PR #${{ github.event.pull_request.number }}
 
 on:
   pull_request:
-    branches: [test]
+    branches: [main]
     paths:
       - 'accounts/**'
 
@@ -12,11 +13,16 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      folders:     ${{ steps.get-folders.outputs.folders }}
-      any_changed: ${{ steps.changed-files.outputs.any_changed }}
+      matrix_dev:  ${{ steps.build-matrix.outputs.matrix_dev }}
+      matrix_stg:  ${{ steps.build-matrix.outputs.matrix_stg }}
+      matrix_prod: ${{ steps.build-matrix.outputs.matrix_prod }}
+      has_dev:     ${{ steps.build-matrix.outputs.has_dev }}
+      has_stg:     ${{ steps.build-matrix.outputs.has_stg }}
+      has_prod:    ${{ steps.build-matrix.outputs.has_prod }}
 
     steps:
-      - uses: actions/checkout@v3
+      - name: checkout
+        uses: actions/checkout@v3
 
       - name: get changed files
         id: changed-files
@@ -24,100 +30,66 @@ jobs:
         with:
           files: accounts/**
 
-      - name: get changed folders
-        id: get-folders
+      - name: build matrix per environment
+        id: build-matrix
         run: |
-          FOLDERS=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" \
+          FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+
+          # extract unique accounts/{env}/{region} paths from changed files
+          ALL=$(echo "$FILES" \
             | tr ' ' '\n' \
-            | xargs -I {} dirname {} \
-            | sort -u \
-            | jq -R -s -c 'split("\n") | map(select(length > 0))')
+            | grep -oP '^accounts/[^/]+/[^/]+' \
+            | sort -u)
 
-          echo "changed folders: $FOLDERS"
-          echo "folders=$FOLDERS" >> $GITHUB_OUTPUT
+          echo "Unique changed paths: $ALL"
 
-  plan:
+          # build per-env matrices
+          build_matrix() {
+            local env=$1
+            echo "$ALL" \
+              | grep "^accounts/$env/" \
+              | while IFS='/' read -r _ e region; do
+                  echo "{\"environment\":\"$e\",\"region\":\"$region\",\"folder\":\"accounts/$e/$region\"}"
+                done \
+              | jq -sc '.'
+          }
+
+          DEV_MATRIX=$(build_matrix dev)
+          STG_MATRIX=$(build_matrix stg)
+          PROD_MATRIX=$(build_matrix prod)
+
+          echo "matrix_dev=$DEV_MATRIX"   >> $GITHUB_OUTPUT
+          echo "matrix_stg=$STG_MATRIX"   >> $GITHUB_OUTPUT
+          echo "matrix_prod=$PROD_MATRIX" >> $GITHUB_OUTPUT
+
+          # has_* flags — true only if matrix is non-empty
+          echo "has_dev=$([[ "$DEV_MATRIX" != "[]" ]]   && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_stg=$([[ "$STG_MATRIX" != "[]" ]]   && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]]  && echo true || echo false)" >> $GITHUB_OUTPUT
+
+  plan-dev:
     needs: detect-changes
-    runs-on: ubuntu-latest
-    if: needs.detect-changes.outputs.any_changed == 'true'
+    if: needs.detect-changes.outputs.has_dev == 'true'
+    uses: ./.github/workflows/terraform_plan_template.yml
+    with:
+      environment: dev
+      matrix:      ${{ needs.detect-changes.outputs.matrix_dev }}
+    secrets: inherit
 
-    strategy:
-      matrix:
-        folder: ${{ fromJson(needs.detect-changes.outputs.folders) }}
-      max-parallel: 1
+  plan-stg:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_stg == 'true'
+    uses: ./.github/workflows/terraform_plan_template.yml
+    with:
+      environment: stg
+      matrix:      ${{ needs.detect-changes.outputs.matrix_stg }}
+    secrets: inherit
 
-    steps:
-      - uses: actions/checkout@v3
-
-      # ── configure aws ──
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
-          role-to-assume:        ${{ secrets.AWS_IAM_ROLE_ARN_DEV }}
-          aws-region:            us-east-1
-          role-duration-seconds: 3600
-
-      # ── setup terraform >= 1.10 for s3 native locking ──
-      - name: setup terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.10.0
-
-      # ── init with s3 native locking ──
-      - name: terraform init
-        run: |
-          terraform -chdir=${{ matrix.folder }} init -reconfigure
-            
-      # ── plan ──
-      - name: terraform plan
-        id: plan
-        run: |
-          terraform -chdir=${{ matrix.folder }} plan \
-            -var-file=environments/dev.tfvars \
-            -no-color 2>&1 | tee plan_output.txt
-
-          PLAN=$(cat plan_output.txt)
-          echo "output<<EOF" >> $GITHUB_OUTPUT
-          echo "$PLAN"       >> $GITHUB_OUTPUT
-          echo "EOF"         >> $GITHUB_OUTPUT
-        env:
-          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN_DEV }}
-          TF_VAR_environment: dev
-          TF_VAR_aws_region:  us-east-2
-        continue-on-error: true
-
-      # ── post plan to PR ──
-      - name: post plan comment
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const folder  = "${{ matrix.folder }}";
-            const plan    = `${{ steps.plan.outputs.output }}`;
-            const status  = "${{ steps.plan.outcome }}" === "success" ? "✅" : "❌";
-
-            const body = `
-            ### ${status} Terraform Plan — \`${folder}\`
-
-            <details>
-            <summary>Click to see plan</summary>
-
-            \`\`\`hcl
-            ${plan}
-            \`\`\`
-
-            </details>
-            `;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner:        context.repo.owner,
-              repo:         context.repo.repo,
-              body:         body
-            });
-
-      # ── fail if plan failed ──
-      - name: check plan status
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
+  plan-prod:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_prod == 'true'
+    uses: ./.github/workflows/terraform_plan_template.yml
+    with:
+      environment: prod
+      matrix:      ${{ needs.detect-changes.outputs.matrix_prod }}
+    secrets: inherit
