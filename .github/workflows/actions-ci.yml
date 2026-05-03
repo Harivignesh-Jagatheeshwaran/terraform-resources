@@ -40,8 +40,6 @@ jobs:
         run: |
           FILES="${{ steps.changed-files.outputs.all_changed_files }}"
 
-          # convert file paths to their parent directories first
-          # then extract unique module-level folder paths
           ALL=$(echo "$FILES" \
             | tr ' ' '\n' \
             | xargs -I {} dirname {} \
@@ -108,3 +106,27 @@ jobs:
       environment: prod
       matrix:      ${{ needs.detect-changes.outputs.matrix_prod }}
     secrets: inherit
+
+  plan-status:
+    runs-on: ubuntu-latest
+    needs: [plan-dev, plan-stg, plan-prod]
+    if: always()
+    steps:
+      - name: check all plans passed
+        run: |
+          DEV="${{ needs.plan-dev.result }}"
+          STG="${{ needs.plan-stg.result }}"
+          PROD="${{ needs.plan-prod.result }}"
+
+          echo "plan-dev:  $DEV"
+          echo "plan-stg:  $STG"
+          echo "plan-prod: $PROD"
+
+          for result in "$DEV" "$STG" "$PROD"; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "One or more plan jobs failed"
+              exit 1
+            fi
+          done
+
+          echo "All plans passed or were skipped"
