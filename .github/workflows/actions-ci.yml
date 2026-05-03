@@ -1,7 +1,7 @@
 # .github/workflows/plan.yml
 
 name: Terraform Plan
-run-name: Terraform Plan — PR #${{ github.event.pull_request.number }}
+run-name: Terraform Plan — PR ${{ github.event.pull_request.number }}
 
 on:
   pull_request:
