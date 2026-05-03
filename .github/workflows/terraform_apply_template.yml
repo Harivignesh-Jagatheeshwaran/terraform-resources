@@ -1,5 +1,3 @@
-# .github/workflows/terraform_apply_template.yml
-
 on:
   workflow_call:
     inputs:
@@ -47,11 +45,21 @@ jobs:
       - name: Terraform Validate
         run: terraform -chdir=${{ matrix.folder }} validate
 
+      - name: Generate Unique Plan Filename
+        id: plan-file
+        run: |
+          # replace / with - to make a safe unique filename per module
+          # e.g. accounts/dev/us-east-2/vpc → accounts-dev-us-east-2-vpc.tfplan
+          SAFE_NAME=$(echo "${{ matrix.folder }}" | tr '/' '-')
+          PLAN_FILE="${SAFE_NAME}.tfplan"
+          echo "plan_file=$PLAN_FILE" >> $GITHUB_OUTPUT
+          echo "Plan file: $PLAN_FILE"
+
       - name: Terraform Plan
         id: plan
         run: |
           terraform -chdir=${{ matrix.folder }} plan \
-            -out=tfplan.binary \
+            -out=${{ steps.plan-file.outputs.plan_file }} \
             -no-color 2>&1 | tee plan_output.txt
 
           PLAN=$(cat plan_output.txt)
@@ -68,60 +76,13 @@ jobs:
         run: |
           terraform -chdir=${{ matrix.folder }} apply \
             -no-color \
-            tfplan.binary 2>&1 | tee apply_output.txt
+            ${{ steps.plan-file.outputs.plan_file }} 2>&1 | tee apply_output.txt
 
           APPLY=$(cat apply_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
           echo "$APPLY"       >> $GITHUB_OUTPUT
           echo "EOF"          >> $GITHUB_OUTPUT
         continue-on-error: true
-
-      - name: Publish Apply Results
-        if: always()
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const folder      = "${{ matrix.folder }}";
-            const environment = "${{ inputs.environment }}";
-            const region      = "${{ matrix.region }}";
-            const plan        = `${{ steps.plan.outputs.output }}`;
-            const apply       = `${{ steps.apply.outputs.output }}`;
-            const status      = "${{ steps.apply.outcome }}" === "success" ? "✅" : "❌";
-
-            const body = `
-            ### ${status} Terraform Apply — \`${folder}\`
-
-            | | |
-            |---|---|
-            | **Environment** | \`${environment}\` |
-            | **Region**      | \`${region}\` |
-            | **Folder**      | \`${folder}\` |
-
-            <details>
-            <summary>Plan output</summary>
-
-            \`\`\`hcl
-            ${plan}
-            \`\`\`
-
-            </details>
-
-            <details>
-            <summary>Apply output</summary>
-
-            \`\`\`hcl
-            ${apply}
-            \`\`\`
-
-            </details>
-            `;
-
-            await github.rest.repos.createCommitComment({
-              owner:      context.repo.owner,
-              repo:       context.repo.repo,
-              commit_sha: context.sha,
-              body:       body
-            });
 
       - name: Validate Apply Succeeded
         if: steps.apply.outcome == 'failure'
