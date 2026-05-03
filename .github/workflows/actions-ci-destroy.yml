@@ -199,15 +199,14 @@ jobs:
   destroy-apply:
     runs-on: ubuntu-latest
     needs: [validate, destroy-plan]
-    environment: destroy-approval    # ← PAUSES here, reviewer must approve
-                                     #   after reviewing plan output above
+    environment: destroy-approval    # ← PAUSES here for reviewer approval
 
     steps:
       - name: checkout
         uses: actions/checkout@v3
 
       - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume:        ${{ secrets.AWS_IAM_ROLE_ARN }}
           aws-region:            ${{ inputs.region }}
@@ -221,13 +220,32 @@ jobs:
       - name: terraform init
         run: terraform -chdir=${{ needs.validate.outputs.folder }} init -reconfigure
 
+      - name: terraform validate
+        run: terraform -chdir=${{ needs.validate.outputs.folder }} validate
+
+      - name: terraform plan destroy
+        id: plan
+        run: |
+          terraform -chdir=${{ needs.validate.outputs.folder }} plan \
+            -destroy \
+            -out=tfplan.binary \
+            -no-color 2>&1 | tee plan_output.txt
+
+          PLAN=$(cat plan_output.txt)
+          echo "output<<EOF"  >> $GITHUB_OUTPUT
+          echo "$PLAN"        >> $GITHUB_OUTPUT
+          echo "EOF"          >> $GITHUB_OUTPUT
+        env:
+          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
+          TF_VAR_environment: ${{ inputs.environment }}
+          TF_VAR_aws_region:  ${{ inputs.region }}
+
       - name: terraform destroy
         id: destroy
         run: |
           terraform -chdir=${{ needs.validate.outputs.folder }} apply \
-            -destroy \
-            -auto-approve \
-            -no-color 2>&1 | tee destroy_output.txt
+            -no-color \
+            tfplan.binary 2>&1 | tee destroy_output.txt
 
           DESTROY=$(cat destroy_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
@@ -244,10 +262,11 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const folder      = "${{ needs.validate.outputs.folder }}";
-            const destroyOut  = `${{ steps.destroy.outputs.output }}`;
-            const destStatus  = "${{ steps.destroy.outcome }}";
-            const status      = destStatus === "success"
+            const folder     = "${{ needs.validate.outputs.folder }}";
+            const planOut    = `${{ steps.plan.outputs.output }}`;
+            const destroyOut = `${{ steps.destroy.outputs.output }}`;
+            const destStatus = "${{ steps.destroy.outcome }}";
+            const status     = destStatus === "success"
               ? "✅ Successfully Destroyed"
               : "❌ Destroy Failed";
 
@@ -263,6 +282,15 @@ jobs:
             | **Module**         | \`${{ inputs.module }}\` |
             | **Triggered by**   | \`${{ github.actor }}\` |
             | **Destroy status** | ${destStatus === "success" ? "✅" : "❌"} \`${destStatus}\` |
+
+            <details>
+            <summary>📋 Plan output</summary>
+
+            \`\`\`hcl
+            ${planOut}
+            \`\`\`
+
+            </details>
 
             <details>
             <summary>💣 Destroy output</summary>
