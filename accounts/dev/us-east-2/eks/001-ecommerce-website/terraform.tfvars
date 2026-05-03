@@ -17,4 +17,3 @@ public_subnet_ids = [
 node_group_name             = "dev-ecommerce-nodes"
 node_group_instance_types   = ["t3.medium"]
 node_group_desired_capacity = 2
-
