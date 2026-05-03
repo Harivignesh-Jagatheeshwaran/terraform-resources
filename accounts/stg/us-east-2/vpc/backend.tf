@@ -1,6 +1,6 @@
 terraform {
   backend "s3" {
-    bucket       = "tf-statemanagement-dataplatform-stg"
+    bucket       = "tf-statemanagement-dataplatform-staging"
     key          = "dataplatform/stg/us-east-2/vpc/terraform.tfstate"
     region       = "us-east-2"
     encrypt      = true
