@@ -1,7 +1,5 @@
-# .github/workflows/plan.yml
-
 name: Terraform Plan
-run-name: Terraform Plan — PR ${{ github.event.pull_request.number }}
+run-name: "Terraform Plan — PR${{ github.event.pull_request.number }} by @${{ github.actor }}"
 
 on:
   pull_request:
@@ -15,7 +13,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  detect-changes:
+  detect-infrastructure-changes:
+    name: Detect Infrastructure Changes
     runs-on: ubuntu-latest
     outputs:
       matrix_dev:  ${{ steps.build-matrix.outputs.matrix_dev }}
@@ -26,16 +25,16 @@ jobs:
       has_prod:    ${{ steps.build-matrix.outputs.has_prod }}
 
     steps:
-      - name: checkout
+      - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: get changed files
+      - name: Identify Changed Files
         id: changed-files
         uses: tj-actions/changed-files@v47
         with:
           files: accounts/**
 
-      - name: build matrix per environment
+      - name: Build Environment Change Matrix
         id: build-matrix
         run: |
           FILES="${{ steps.changed-files.outputs.all_changed_files }}"
@@ -80,53 +79,61 @@ jobs:
           echo "has_stg=$([[ "$STG_MATRIX"  != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
           echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
-  plan-dev:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has_dev == 'true'
+  terraform-plan-development:
+    name: Terraform Plan — Development
+    needs: detect-infrastructure-changes
+    if: needs.detect-infrastructure-changes.outputs.has_dev == 'true'
     uses: ./.github/workflows/terraform_plan_template.yml
     with:
       environment: dev
-      matrix:      ${{ needs.detect-changes.outputs.matrix_dev }}
+      matrix:      ${{ needs.detect-infrastructure-changes.outputs.matrix_dev }}
     secrets: inherit
 
-  plan-stg:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has_stg == 'true'
+  terraform-plan-staging:
+    name: Terraform Plan — Staging
+    needs: detect-infrastructure-changes
+    if: needs.detect-infrastructure-changes.outputs.has_stg == 'true'
     uses: ./.github/workflows/terraform_plan_template.yml
     with:
       environment: stg
-      matrix:      ${{ needs.detect-changes.outputs.matrix_stg }}
+      matrix:      ${{ needs.detect-infrastructure-changes.outputs.matrix_stg }}
     secrets: inherit
 
-  plan-prod:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has_prod == 'true'
+  terraform-plan-production:
+    name: Terraform Plan — Production
+    needs: detect-infrastructure-changes
+    if: needs.detect-infrastructure-changes.outputs.has_prod == 'true'
     uses: ./.github/workflows/terraform_plan_template.yml
     with:
       environment: prod
-      matrix:      ${{ needs.detect-changes.outputs.matrix_prod }}
+      matrix:      ${{ needs.detect-infrastructure-changes.outputs.matrix_prod }}
     secrets: inherit
 
-  plan-status:
+  terraform-plan-gate:
+    name: Terraform Plan Quality Gate
     runs-on: ubuntu-latest
-    needs: [plan-dev, plan-stg, plan-prod]
+    needs: [terraform-plan-development, terraform-plan-staging, terraform-plan-production]
     if: always()
     steps:
-      - name: check all plans passed
+      - name: Evaluate Plan Results
         run: |
-          DEV="${{ needs.plan-dev.result }}"
-          STG="${{ needs.plan-stg.result }}"
-          PROD="${{ needs.plan-prod.result }}"
+          DEV="${{ needs.terraform-plan-development.result }}"
+          STG="${{ needs.terraform-plan-staging.result }}"
+          PROD="${{ needs.terraform-plan-production.result }}"
 
-          echo "plan-dev:  $DEV"
-          echo "plan-stg:  $STG"
-          echo "plan-prod: $PROD"
+          echo "================================================"
+          echo "TERRAFORM PLAN QUALITY GATE"
+          echo "================================================"
+          echo "Development : $DEV"
+          echo "Staging     : $STG"
+          echo "Production  : $PROD"
+          echo "================================================"
 
           for result in "$DEV" "$STG" "$PROD"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
-              echo "One or more plan jobs failed"
+              echo "❌ Quality gate failed — one or more plan jobs failed"
               exit 1
             fi
           done
 
-          echo "All plans passed or were skipped"
+          echo "✅ Quality gate passed — all plans succeeded or were skipped"

@@ -1,7 +1,5 @@
-# .github/workflows/apply.yml
-
 name: Terraform Apply
-run-name: Terraform Apply — ${{ github.sha }}
+run-name: "Terraform Apply — ${{ github.sha }} by @${{ github.actor }}"
 
 on:
   push:
@@ -14,7 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  detect-changes:
+  detect-infrastructure-changes:
+    name: Detect Infrastructure Changes
     runs-on: ubuntu-latest
     outputs:
       matrix_dev:  ${{ steps.build-matrix.outputs.matrix_dev }}
@@ -25,18 +24,18 @@ jobs:
       has_prod:    ${{ steps.build-matrix.outputs.has_prod }}
 
     steps:
-      - name: checkout
+      - name: Checkout Repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 2
 
-      - name: get changed files
+      - name: Identify Changed Files
         id: changed-files
         uses: tj-actions/changed-files@v47
         with:
           files: accounts/**
 
-      - name: build matrix per environment
+      - name: Build Environment Change Matrix
         id: build-matrix
         run: |
           FILES="${{ steps.changed-files.outputs.all_changed_files }}"
@@ -81,29 +80,32 @@ jobs:
           echo "has_stg=$([[ "$STG_MATRIX"  != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
           echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
-  apply-dev:
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.has_dev == 'true'
+  terraform-apply-development:
+    name: Terraform Apply — Development
+    needs: detect-infrastructure-changes
+    if: needs.detect-infrastructure-changes.outputs.has_dev == 'true'
     uses: ./.github/workflows/terraform_apply_template.yml
     with:
       environment: dev
-      matrix:      ${{ needs.detect-changes.outputs.matrix_dev }}
+      matrix:      ${{ needs.detect-infrastructure-changes.outputs.matrix_dev }}
     secrets: inherit
 
-  apply-stg:
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.has_stg == 'true'
+  terraform-apply-staging:
+    name: Terraform Apply — Staging
+    needs: detect-infrastructure-changes
+    if: needs.detect-infrastructure-changes.outputs.has_stg == 'true'
     uses: ./.github/workflows/terraform_apply_template.yml
     with:
       environment: stg
-      matrix:      ${{ needs.detect-changes.outputs.matrix_stg }}
+      matrix:      ${{ needs.detect-infrastructure-changes.outputs.matrix_stg }}
     secrets: inherit
 
-  apply-prod:
-    needs: [detect-changes]
-    if: needs.detect-changes.outputs.has_prod == 'true'
+  terraform-apply-production:
+    name: Terraform Apply — Production
+    needs: detect-infrastructure-changes
+    if: needs.detect-infrastructure-changes.outputs.has_prod == 'true'
     uses: ./.github/workflows/terraform_apply_template.yml
     with:
       environment: prod
-      matrix:      ${{ needs.detect-changes.outputs.matrix_prod }}
+      matrix:      ${{ needs.detect-infrastructure-changes.outputs.matrix_prod }}
     secrets: inherit

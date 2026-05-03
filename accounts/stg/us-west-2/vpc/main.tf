@@ -8,4 +8,3 @@ module "vpc" {
   availability_zones   = var.availability_zones
   enable_nat_gateway   = var.enable_nat_gateway
 }
-
