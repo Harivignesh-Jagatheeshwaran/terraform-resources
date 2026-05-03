@@ -82,7 +82,7 @@ jobs:
           echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
   apply-dev:
-    needs: detect-changes
+    needs: [detect-changes]
     if: needs.detect-changes.outputs.has_dev == 'true'
     uses: ./.github/workflows/terraform_apply_template.yml
     with:
@@ -91,7 +91,7 @@ jobs:
     secrets: inherit
 
   apply-stg:
-    needs: [detect-changes, apply-dev]
+    needs: [detect-changes]
     if: needs.detect-changes.outputs.has_stg == 'true'
     uses: ./.github/workflows/terraform_apply_template.yml
     with:
@@ -100,7 +100,7 @@ jobs:
     secrets: inherit
 
   apply-prod:
-    needs: [detect-changes, apply-stg]
+    needs: [detect-changes]
     if: needs.detect-changes.outputs.has_prod == 'true'
     uses: ./.github/workflows/terraform_apply_template.yml
     with:
