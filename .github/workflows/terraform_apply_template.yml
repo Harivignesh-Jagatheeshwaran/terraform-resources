@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  apply:
+  terraform-apply:
+    name: "Apply [${{ inputs.environment }}] ${{ matrix.folder }}"
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
 
@@ -25,28 +26,28 @@ jobs:
         include: ${{ fromJson(inputs.matrix) }}
 
     steps:
-      - name: checkout
+      - name: Checkout Repository
         uses: actions/checkout@v3
 
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume:        ${{ secrets.AWS_IAM_ROLE_ARN }}
           aws-region:            ${{ matrix.region }}
           role-duration-seconds: 3600
 
-      - name: setup terraform
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.0
 
-      - name: terraform init
+      - name: Terraform Init
         run: terraform -chdir=${{ matrix.folder }} init -reconfigure
 
-      - name: terraform validate
+      - name: Terraform Validate
         run: terraform -chdir=${{ matrix.folder }} validate
 
-      - name: terraform plan
+      - name: Terraform Plan
         id: plan
         run: |
           terraform -chdir=${{ matrix.folder }} plan \
@@ -62,7 +63,7 @@ jobs:
           TF_VAR_environment: ${{ inputs.environment }}
           TF_VAR_aws_region:  ${{ matrix.region }}
 
-      - name: terraform apply
+      - name: Terraform Apply
         id: apply
         run: |
           terraform -chdir=${{ matrix.folder }} apply \
@@ -75,6 +76,53 @@ jobs:
           echo "EOF"          >> $GITHUB_OUTPUT
         continue-on-error: true
 
-      - name: check apply status
+      - name: Publish Apply Results
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const folder      = "${{ matrix.folder }}";
+            const environment = "${{ inputs.environment }}";
+            const region      = "${{ matrix.region }}";
+            const plan        = `${{ steps.plan.outputs.output }}`;
+            const apply       = `${{ steps.apply.outputs.output }}`;
+            const status      = "${{ steps.apply.outcome }}" === "success" ? "✅" : "❌";
+
+            const body = `
+            ### ${status} Terraform Apply — \`${folder}\`
+
+            | | |
+            |---|---|
+            | **Environment** | \`${environment}\` |
+            | **Region**      | \`${region}\` |
+            | **Folder**      | \`${folder}\` |
+
+            <details>
+            <summary>Plan output</summary>
+
+            \`\`\`hcl
+            ${plan}
+            \`\`\`
+
+            </details>
+
+            <details>
+            <summary>Apply output</summary>
+
+            \`\`\`hcl
+            ${apply}
+            \`\`\`
+
+            </details>
+            `;
+
+            await github.rest.repos.createCommitComment({
+              owner:      context.repo.owner,
+              repo:       context.repo.repo,
+              commit_sha: context.sha,
+              body:       body
+            });
+
+      - name: Validate Apply Succeeded
         if: steps.apply.outcome == 'failure'
         run: exit 1
