@@ -195,11 +195,23 @@ jobs:
           echo "❌ Destroy plan failed — aborting"
           exit 1
 
-  # ── JOB 3: wait for approval then destroy ──────────────────────
-  destroy-apply:
+  # ── JOB 3: pure approval gate, no aws needed ──────────────────
+  approval-gate:
     runs-on: ubuntu-latest
     needs: [validate, destroy-plan]
-    environment: destroy-approval    # ← PAUSES here for reviewer approval
+    environment: destroy-approval # ← PAUSES here for reviewer approval
+
+    steps:
+      - name: approval received
+        run: |
+          echo "✅ Destroy approved by reviewer"
+          echo "Proceeding to destroy: ${{ needs.validate.outputs.folder }}"
+
+  # ── JOB 4: destroy resources ──────────────────────
+  destroy-apply:
+    runs-on: ubuntu-latest
+    needs: [validate, approval-gate]
+    environment: ${{ inputs.environment }}     
 
     steps:
       - name: checkout
