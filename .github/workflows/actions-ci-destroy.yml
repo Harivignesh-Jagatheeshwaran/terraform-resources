@@ -107,7 +107,7 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v3
-
+        environment: ${{ inputs.environment }}
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
