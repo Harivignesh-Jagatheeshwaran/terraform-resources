@@ -1,0 +1,241 @@
+# .github/workflows/destroy.yml
+
+name: Terraform Destroy
+run-name: 💣 Destroy — ${{ inputs.environment }}/${{ inputs.region }}/${{ inputs.module }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          - prod
+
+      region:
+        description: 'AWS Region'
+        required: true
+        type: choice
+        options:
+          - us-east-1
+          - us-east-2
+          - us-west-1
+          - us-west-2
+          - eu-west-1
+
+      module:
+        description: |
+          Module path inside accounts/{env}/{region}/
+          Examples:
+            vpc
+            eks/001-ecommerce-website
+            airflow
+            ec2
+        required: true
+        type: string
+
+      confirm:
+        description: 'Type DESTROY to confirm'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      folder: ${{ steps.resolve.outputs.folder }}
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: confirm destroy intent
+        run: |
+          if [[ "${{ inputs.confirm }}" != "DESTROY" ]]; then
+            echo "❌ ERROR: You must type DESTROY in the confirm field"
+            echo "You typed: ${{ inputs.confirm }}"
+            exit 1
+          fi
+          echo "✅ Confirmation accepted"
+
+      - name: resolve and validate folder
+        id: resolve
+        run: |
+          FOLDER="accounts/${{ inputs.environment }}/${{ inputs.region }}/${{ inputs.module }}"
+
+          echo "Resolved folder: $FOLDER"
+
+          # validate folder exists in repo
+          if [[ ! -d "$FOLDER" ]]; then
+            echo ""
+            echo "❌ ERROR: $FOLDER does not exist in this repo"
+            echo ""
+            echo "Available modules under accounts/${{ inputs.environment }}/${{ inputs.region }}:"
+            find "accounts/${{ inputs.environment }}/${{ inputs.region }}" \
+              -name "main.tf" \
+              | xargs -I {} dirname {} \
+              | sed "s|accounts/${{ inputs.environment }}/${{ inputs.region }}/||" \
+              | sort \
+              2>/dev/null || echo "  (none found or region does not exist)"
+            exit 1
+          fi
+
+          # validate it is a terraform module
+          if [[ ! -f "$FOLDER/main.tf" ]]; then
+            echo ""
+            echo "❌ ERROR: $FOLDER does not appear to be a Terraform module"
+            echo "Expected to find main.tf in $FOLDER"
+            exit 1
+          fi
+
+          echo "✅ Folder validated: $FOLDER"
+          echo "folder=$FOLDER" >> $GITHUB_OUTPUT
+
+  destroy:
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: ${{ inputs.environment }}    # ← prod pauses here for required reviewer approval
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume:        ${{ secrets.AWS_IAM_ROLE_ARN }}
+          aws-region:            ${{ inputs.region }}
+          role-duration-seconds: 3600
+
+      - name: setup terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.0
+
+      - name: terraform init
+        run: |
+          terraform -chdir=${{ needs.validate.outputs.folder }} init -reconfigure
+
+      - name: terraform validate
+        run: |
+          terraform -chdir=${{ needs.validate.outputs.folder }} validate
+
+      - name: terraform plan destroy
+        id: plan
+        run: |
+          terraform -chdir=${{ needs.validate.outputs.folder }} plan \
+            -destroy \
+            -no-color 2>&1 | tee plan_output.txt
+
+          echo ""
+          echo "=========================================="
+          echo "RESOURCES THAT WILL BE DESTROYED:"
+          echo "=========================================="
+          cat plan_output.txt
+
+          PLAN=$(cat plan_output.txt)
+          echo "output<<EOF"  >> $GITHUB_OUTPUT
+          echo "$PLAN"        >> $GITHUB_OUTPUT
+          echo "EOF"          >> $GITHUB_OUTPUT
+        env:
+          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
+          TF_VAR_environment: ${{ inputs.environment }}
+          TF_VAR_aws_region:  ${{ inputs.region }}
+        continue-on-error: true
+
+      - name: fail if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: |
+          echo "❌ Destroy plan failed — aborting"
+          exit 1
+
+      - name: terraform destroy
+        id: destroy
+        run: |
+          terraform -chdir=${{ needs.validate.outputs.folder }} apply \
+            -destroy \
+            -auto-approve \
+            -no-color 2>&1 | tee destroy_output.txt
+
+          DESTROY=$(cat destroy_output.txt)
+          echo "output<<EOF"  >> $GITHUB_OUTPUT
+          echo "$DESTROY"     >> $GITHUB_OUTPUT
+          echo "EOF"          >> $GITHUB_OUTPUT
+        env:
+          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
+          TF_VAR_environment: ${{ inputs.environment }}
+          TF_VAR_aws_region:  ${{ inputs.region }}
+        continue-on-error: true
+
+      - name: post destroy summary
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const folder      = "${{ needs.validate.outputs.folder }}";
+            const environment = "${{ inputs.environment }}";
+            const region      = "${{ inputs.region }}";
+            const module      = "${{ inputs.module }}";
+            const actor       = "${{ github.actor }}";
+            const planOut     = `${{ steps.plan.outputs.output }}`;
+            const destroyOut  = `${{ steps.destroy.outputs.output }}`;
+            const planStatus  = "${{ steps.plan.outcome }}";
+            const destStatus  = "${{ steps.destroy.outcome }}";
+
+            const overallStatus = destStatus === "success"
+              ? "✅ Successfully Destroyed"
+              : planStatus !== "success"
+              ? "❌ Failed at Plan"
+              : "❌ Failed at Destroy";
+
+            const summary = `
+            ## ${overallStatus}
+
+            ### 💣 Terraform Destroy — \`${folder}\`
+
+            | | |
+            |---|---|
+            | **Environment**  | \`${environment}\` |
+            | **Region**       | \`${region}\` |
+            | **Module**       | \`${module}\` |
+            | **Triggered by** | \`${actor}\` |
+            | **Plan status**  | ${planStatus === "success" ? "✅" : "❌"} \`${planStatus}\` |
+            | **Destroy status** | ${destStatus === "success" ? "✅" : "❌"} \`${destStatus}\` |
+
+            <details>
+            <summary>📋 Destroy plan output</summary>
+
+            \`\`\`hcl
+            ${planOut}
+            \`\`\`
+
+            </details>
+
+            <details>
+            <summary>💣 Destroy output</summary>
+
+            \`\`\`hcl
+            ${destroyOut}
+            \`\`\`
+
+            </details>
+            `;
+
+            // write to github actions job summary
+            // visible in Actions UI under the workflow run
+            await core.summary
+              .addRaw(summary)
+              .write();
+
+      - name: check destroy status
+        if: steps.destroy.outcome == 'failure'
+        run: |
+          echo "❌ Destroy failed"
+          exit 1
