@@ -1,4 +1,4 @@
-is_destroy = false
+is_destroy = true
 vpc_name = "dev-ecommerce-vpc"
 vpc_cidr = "10.0.0.0/16"
 
