@@ -44,27 +44,10 @@ jobs:
       - name: terraform init
         run: terraform -chdir=${{ matrix.folder }} init -reconfigure
 
-      # check is_destroy flag from tfvars before planning
-      - name: check destroy flag
-        id: check-destroy
-        run: |
-          TFVARS="${{ matrix.folder }}/terraform.tfvars"
-
-          if grep -q 'is_destroy\s*=\s*true' "$TFVARS"; then
-            echo "mode=destroy" >> $GITHUB_OUTPUT
-            echo "IS_DESTROY=true detected — will show destroy plan"
-          else
-            echo "mode=apply"   >> $GITHUB_OUTPUT
-            echo "IS_DESTROY not set or false — will show apply plan"
-          fi
-
-      # ── NORMAL PLAN ──────────────────────────────────────────
       - name: terraform plan
         id: plan
-        if: steps.check-destroy.outputs.mode == 'apply'
         run: |
           terraform -chdir=${{ matrix.folder }} plan \
-            -out=tfplan.binary \
             -no-color 2>&1 | tee plan_output.txt
 
           PLAN=$(cat plan_output.txt)
@@ -77,27 +60,6 @@ jobs:
           TF_VAR_aws_region:  ${{ matrix.region }}
         continue-on-error: true
 
-      # ── DESTROY PLAN ─────────────────────────────────────────
-      - name: terraform plan destroy
-        id: plan-destroy
-        if: steps.check-destroy.outputs.mode == 'destroy'
-        run: |
-          terraform -chdir=${{ matrix.folder }} plan \
-            -destroy \
-            -out=tfplan.binary \
-            -no-color 2>&1 | tee plan_output.txt
-
-          PLAN=$(cat plan_output.txt)
-          echo "output<<EOF"  >> $GITHUB_OUTPUT
-          echo "$PLAN"        >> $GITHUB_OUTPUT
-          echo "EOF"          >> $GITHUB_OUTPUT
-        env:
-          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
-          TF_VAR_environment: ${{ inputs.environment }}
-          TF_VAR_aws_region:  ${{ matrix.region }}
-        continue-on-error: true
-
-      # ── POST COMMENT (both modes) ────────────────────────────
       - name: post plan comment
         uses: actions/github-script@v6
         with:
@@ -105,41 +67,20 @@ jobs:
             const folder      = "${{ matrix.folder }}";
             const environment = "${{ inputs.environment }}";
             const region      = "${{ matrix.region }}";
-            const mode        = "${{ steps.check-destroy.outputs.mode }}";
-            const isDestroy   = mode === "destroy";
-
-            const plan    = isDestroy
-              ? `${{ steps.plan-destroy.outputs.output }}`
-              : `${{ steps.plan.outputs.output }}`;
-
-            const outcome = isDestroy
-              ? "${{ steps.plan-destroy.outcome }}"
-              : "${{ steps.plan.outcome }}";
-
-            const status  = outcome === "success" ? "✅" : "❌";
-            const action  = isDestroy ? "💣 Destroy Plan" : "Plan";
-
-            // warn reviewer loudly if this is a destroy
-            const destroyWarning = isDestroy ? `
-            > ⚠️ **WARNING — This will DESTROY infrastructure.**
-            > Merging this PR will permanently delete the resources listed below.
-            > Make sure you have reviewed the destroy plan carefully before approving.
-            ` : "";
+            const plan        = `${{ steps.plan.outputs.output }}`;
+            const status      = "${{ steps.plan.outcome }}" === "success" ? "✅" : "❌";
 
             const body = `
-            ### ${status} Terraform ${action} — \`${folder}\`
-
-            ${destroyWarning}
+            ### ${status} Terraform Plan — \`${folder}\`
 
             | | |
             |---|---|
             | **Environment** | \`${environment}\` |
             | **Region**      | \`${region}\` |
             | **Folder**      | \`${folder}\` |
-            | **Mode**        | \`${isDestroy ? "💣 DESTROY" : "Apply"}\` |
 
             <details>
-            <summary>Click to expand ${isDestroy ? "destroy" : ""} plan output</summary>
+            <summary>Click to expand plan output</summary>
 
             \`\`\`hcl
             ${plan}
@@ -156,7 +97,7 @@ jobs:
 
             const existing = comments.find(c =>
               c.user.login === "github-actions[bot]" &&
-              c.body.includes(`Terraform ${action} — \`${folder}\``)
+              c.body.includes(`Terraform Plan — \`${folder}\``)
             );
 
             if (existing) {
@@ -176,7 +117,5 @@ jobs:
             }
 
       - name: check plan status
-        if: |
-          steps.plan.outcome == 'failure' ||
-          steps.plan-destroy.outcome == 'failure'
+        if: steps.plan.outcome == 'failure'
         run: exit 1

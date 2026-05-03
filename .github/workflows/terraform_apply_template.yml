@@ -46,24 +46,8 @@ jobs:
       - name: terraform validate
         run: terraform -chdir=${{ matrix.folder }} validate
 
-      # check is_destroy flag from tfvars
-      - name: check destroy flag
-        id: check-destroy
-        run: |
-          TFVARS="${{ matrix.folder }}/terraform.tfvars"
-
-          if grep -q 'is_destroy\s*=\s*true' "$TFVARS"; then
-            echo "mode=destroy" >> $GITHUB_OUTPUT
-            echo "IS_DESTROY=true detected in $TFVARS — running destroy"
-          else
-            echo "mode=apply"   >> $GITHUB_OUTPUT
-            echo "IS_DESTROY not set or false — running apply"
-          fi
-
-      # ── APPLY MODE ──────────────────────────────────────────
       - name: terraform plan
         id: plan
-        if: steps.check-destroy.outputs.mode == 'apply'
         run: |
           terraform -chdir=${{ matrix.folder }} plan \
             -out=tfplan.binary \
@@ -80,7 +64,6 @@ jobs:
 
       - name: terraform apply
         id: apply
-        if: steps.check-destroy.outputs.mode == 'apply'
         run: |
           terraform -chdir=${{ matrix.folder }} apply \
             -no-color \
@@ -92,41 +75,6 @@ jobs:
           echo "EOF"          >> $GITHUB_OUTPUT
         continue-on-error: true
 
-      # ── DESTROY MODE ─────────────────────────────────────────
-      - name: terraform plan destroy
-        id: plan-destroy
-        if: steps.check-destroy.outputs.mode == 'destroy'
-        run: |
-          terraform -chdir=${{ matrix.folder }} plan \
-            -destroy \
-            -out=tfplan.binary \
-            -no-color 2>&1 | tee plan_output.txt
-
-          PLAN=$(cat plan_output.txt)
-          echo "output<<EOF"  >> $GITHUB_OUTPUT
-          echo "$PLAN"        >> $GITHUB_OUTPUT
-          echo "EOF"          >> $GITHUB_OUTPUT
-        env:
-          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
-          TF_VAR_environment: ${{ inputs.environment }}
-          TF_VAR_aws_region:  ${{ matrix.region }}
-
-      - name: terraform destroy
-        id: destroy
-        if: steps.check-destroy.outputs.mode == 'destroy'
-        run: |
-          terraform -chdir=${{ matrix.folder }} apply \
-            -no-color \
-            tfplan.binary 2>&1 | tee apply_output.txt
-
-          APPLY=$(cat apply_output.txt)
-          echo "output<<EOF"  >> $GITHUB_OUTPUT
-          echo "$APPLY"       >> $GITHUB_OUTPUT
-          echo "EOF"          >> $GITHUB_OUTPUT
-        continue-on-error: true
-
-      - name: check result status
-        if: |
-          steps.apply.outcome == 'failure' ||
-          steps.destroy.outcome == 'failure'
+      - name: check apply status
+        if: steps.apply.outcome == 'failure'
         run: exit 1
