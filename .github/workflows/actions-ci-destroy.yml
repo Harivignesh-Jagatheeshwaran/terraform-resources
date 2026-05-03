@@ -101,13 +101,14 @@ jobs:
   destroy-plan:
     runs-on: ubuntu-latest
     needs: validate
+    environment: ${{ inputs.environment }}
     outputs:
       folder: ${{ needs.validate.outputs.folder }}
 
     steps:
       - name: checkout
         uses: actions/checkout@v3
-        environment: ${{ inputs.environment }}
+        
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
