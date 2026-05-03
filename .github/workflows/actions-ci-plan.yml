@@ -1,0 +1,132 @@
+# .github/workflows/plan.yml
+
+name: Terraform Plan
+run-name: Terraform Plan — PR ${{ github.event.pull_request.number }}
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'accounts/**'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_dev:  ${{ steps.build-matrix.outputs.matrix_dev }}
+      matrix_stg:  ${{ steps.build-matrix.outputs.matrix_stg }}
+      matrix_prod: ${{ steps.build-matrix.outputs.matrix_prod }}
+      has_dev:     ${{ steps.build-matrix.outputs.has_dev }}
+      has_stg:     ${{ steps.build-matrix.outputs.has_stg }}
+      has_prod:    ${{ steps.build-matrix.outputs.has_prod }}
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v47
+        with:
+          files: accounts/**
+
+      - name: build matrix per environment
+        id: build-matrix
+        run: |
+          FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+
+          ALL=$(echo "$FILES" \
+            | tr ' ' '\n' \
+            | xargs -I {} dirname {} \
+            | grep -oP '^accounts/[^/]+/[^/]+/[^/]+(/[^/]+)?' \
+            | sort -u)
+
+          echo "Unique changed module paths:"
+          echo "$ALL"
+
+          build_matrix() {
+            local env=$1
+            local result
+
+            result=$(echo "$ALL" \
+              | grep "^accounts/$env/" \
+              | while read -r folder; do
+                  region=$(echo "$folder" | cut -d'/' -f3)
+                  echo "{\"environment\":\"$env\",\"region\":\"$region\",\"folder\":\"$folder\"}"
+                done \
+              | jq -sc '.')
+
+            echo "${result:-[]}"
+          }
+
+          DEV_MATRIX=$(build_matrix dev)
+          STG_MATRIX=$(build_matrix stg)
+          PROD_MATRIX=$(build_matrix prod)
+
+          echo "matrix_dev=$DEV_MATRIX"   >> $GITHUB_OUTPUT
+          echo "matrix_stg=$STG_MATRIX"   >> $GITHUB_OUTPUT
+          echo "matrix_prod=$PROD_MATRIX" >> $GITHUB_OUTPUT
+
+          echo "Dev matrix:  $DEV_MATRIX"
+          echo "Stg matrix:  $STG_MATRIX"
+          echo "Prod matrix: $PROD_MATRIX"
+
+          echo "has_dev=$([[ "$DEV_MATRIX"  != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_stg=$([[ "$STG_MATRIX"  != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+  plan-dev:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_dev == 'true'
+    uses: ./.github/workflows/terraform_plan_template.yml
+    with:
+      environment: dev
+      matrix:      ${{ needs.detect-changes.outputs.matrix_dev }}
+    secrets: inherit
+
+  plan-stg:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_stg == 'true'
+    uses: ./.github/workflows/terraform_plan_template.yml
+    with:
+      environment: stg
+      matrix:      ${{ needs.detect-changes.outputs.matrix_stg }}
+    secrets: inherit
+
+  plan-prod:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_prod == 'true'
+    uses: ./.github/workflows/terraform_plan_template.yml
+    with:
+      environment: prod
+      matrix:      ${{ needs.detect-changes.outputs.matrix_prod }}
+    secrets: inherit
+
+  plan-status:
+    runs-on: ubuntu-latest
+    needs: [plan-dev, plan-stg, plan-prod]
+    if: always()
+    steps:
+      - name: check all plans passed
+        run: |
+          DEV="${{ needs.plan-dev.result }}"
+          STG="${{ needs.plan-stg.result }}"
+          PROD="${{ needs.plan-prod.result }}"
+
+          echo "plan-dev:  $DEV"
+          echo "plan-stg:  $STG"
+          echo "plan-prod: $PROD"
+
+          for result in "$DEV" "$STG" "$PROD"; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "One or more plan jobs failed"
+              exit 1
+            fi
+          done
+
+          echo "All plans passed or were skipped"

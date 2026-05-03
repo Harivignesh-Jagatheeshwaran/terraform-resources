@@ -1,18 +1,17 @@
-# .github/workflows/plan.yml
+# .github/workflows/apply.yml
 
-name: Terraform Plan
-run-name: Terraform Plan — PR #${{ github.event.pull_request.number }}
+name: Terraform Apply
+run-name: Terraform Apply — ${{ github.sha }}
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
       - 'accounts/**'
 
 permissions:
-      id-token: write
-      contents: read
-      pull-requests: write 
+  id-token: write
+  contents: read
 
 jobs:
   detect-changes:
@@ -28,6 +27,8 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
 
       - name: get changed files
         id: changed-files
@@ -40,23 +41,28 @@ jobs:
         run: |
           FILES="${{ steps.changed-files.outputs.all_changed_files }}"
 
-          # extract unique accounts/{env}/{region} paths from changed files
           ALL=$(echo "$FILES" \
             | tr ' ' '\n' \
-            | grep -oP '^accounts/[^/]+/[^/]+' \
+            | xargs -I {} dirname {} \
+            | grep -oP '^accounts/[^/]+/[^/]+/[^/]+(/[^/]+)?' \
             | sort -u)
 
-          echo "Unique changed paths: $ALL"
+          echo "Unique changed module paths:"
+          echo "$ALL"
 
-          # build per-env matrices
           build_matrix() {
             local env=$1
-            echo "$ALL" \
+            local result
+
+            result=$(echo "$ALL" \
               | grep "^accounts/$env/" \
-              | while IFS='/' read -r _ e region; do
-                  echo "{\"environment\":\"$e\",\"region\":\"$region\",\"folder\":\"accounts/$e/$region\"}"
+              | while read -r folder; do
+                  region=$(echo "$folder" | cut -d'/' -f3)
+                  echo "{\"environment\":\"$env\",\"region\":\"$region\",\"folder\":\"$folder\"}"
                 done \
-              | jq -sc '.'
+              | jq -sc '.')
+
+            echo "${result:-[]}"
           }
 
           DEV_MATRIX=$(build_matrix dev)
@@ -67,33 +73,36 @@ jobs:
           echo "matrix_stg=$STG_MATRIX"   >> $GITHUB_OUTPUT
           echo "matrix_prod=$PROD_MATRIX" >> $GITHUB_OUTPUT
 
-          # has_* flags — true only if matrix is non-empty
-          echo "has_dev=$([[ "$DEV_MATRIX" != "[]" ]]   && echo true || echo false)" >> $GITHUB_OUTPUT
-          echo "has_stg=$([[ "$STG_MATRIX" != "[]" ]]   && echo true || echo false)" >> $GITHUB_OUTPUT
-          echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]]  && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "Dev matrix:  $DEV_MATRIX"
+          echo "Stg matrix:  $STG_MATRIX"
+          echo "Prod matrix: $PROD_MATRIX"
 
-  plan-dev:
+          echo "has_dev=$([[ "$DEV_MATRIX"  != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_stg=$([[ "$STG_MATRIX"  != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_prod=$([[ "$PROD_MATRIX" != "[]" ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+  apply-dev:
     needs: detect-changes
     if: needs.detect-changes.outputs.has_dev == 'true'
-    uses: ./.github/workflows/terraform_plan_template.yml
+    uses: ./.github/workflows/terraform_apply_template.yml
     with:
       environment: dev
       matrix:      ${{ needs.detect-changes.outputs.matrix_dev }}
     secrets: inherit
 
-  plan-stg:
-    needs: detect-changes
+  apply-stg:
+    needs: [detect-changes, apply-dev]
     if: needs.detect-changes.outputs.has_stg == 'true'
-    uses: ./.github/workflows/terraform_plan_template.yml
+    uses: ./.github/workflows/terraform_apply_template.yml
     with:
       environment: stg
       matrix:      ${{ needs.detect-changes.outputs.matrix_stg }}
     secrets: inherit
 
-  plan-prod:
-    needs: detect-changes
+  apply-prod:
+    needs: [detect-changes, apply-stg]
     if: needs.detect-changes.outputs.has_prod == 'true'
-    uses: ./.github/workflows/terraform_plan_template.yml
+    uses: ./.github/workflows/terraform_apply_template.yml
     with:
       environment: prod
       matrix:      ${{ needs.detect-changes.outputs.matrix_prod }}
