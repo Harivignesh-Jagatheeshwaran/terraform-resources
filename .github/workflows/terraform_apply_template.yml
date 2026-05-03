@@ -76,53 +76,6 @@ jobs:
           echo "EOF"          >> $GITHUB_OUTPUT
         continue-on-error: true
 
-      - name: Publish Apply Results
-        if: always()
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const folder      = "${{ matrix.folder }}";
-            const environment = "${{ inputs.environment }}";
-            const region      = "${{ matrix.region }}";
-            const plan        = `${{ steps.plan.outputs.output }}`;
-            const apply       = `${{ steps.apply.outputs.output }}`;
-            const status      = "${{ steps.apply.outcome }}" === "success" ? "✅" : "❌";
-
-            const body = `
-            ### ${status} Terraform Apply — \`${folder}\`
-
-            | | |
-            |---|---|
-            | **Environment** | \`${environment}\` |
-            | **Region**      | \`${region}\` |
-            | **Folder**      | \`${folder}\` |
-
-            <details>
-            <summary>Plan output</summary>
-
-            \`\`\`hcl
-            ${plan}
-            \`\`\`
-
-            </details>
-
-            <details>
-            <summary>Apply output</summary>
-
-            \`\`\`hcl
-            ${apply}
-            \`\`\`
-
-            </details>
-            `;
-
-            await github.rest.repos.createCommitComment({
-              owner:      context.repo.owner,
-              repo:       context.repo.repo,
-              commit_sha: context.sha,
-              body:       body
-            });
-
       - name: Validate Apply Succeeded
         if: steps.apply.outcome == 'failure'
         run: exit 1
