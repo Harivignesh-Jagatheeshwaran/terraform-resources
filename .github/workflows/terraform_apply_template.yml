@@ -70,13 +70,27 @@ jobs:
           TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
         run: |
-          terragrunt plan 2>&1 | tee plan_output.txt
+          set +e
+          terragrunt plan -detailed-exitcode 2>&1 | tee plan_output.txt
           EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "Plan exit code: $EXIT_CODE"
+
           PLAN=$(cat plan_output.txt)
           echo "output<<EOF" >> $GITHUB_OUTPUT
           echo "$PLAN" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          if [ $EXIT_CODE -eq 1 ]; then exit 1; fi
+
+          # 0 = no changes
+          # 1 = error
+          # 2 = changes present — success
+          if [ $EXIT_CODE -eq 1 ]; then
+            echo "Plan failed with error"
+            exit 1
+          fi
+
+          echo "Plan succeeded"
           exit 0
 
       - name: Terragrunt Apply
@@ -86,8 +100,20 @@ jobs:
           TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
         run: |
+          set +e
           terragrunt apply -auto-approve 2>&1 | tee apply_output.txt
+          EXIT_CODE=$?
+          set -e
+
           APPLY=$(cat apply_output.txt)
           echo "output<<EOF" >> $GITHUB_OUTPUT
           echo "$APPLY" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Apply failed"
+            exit 1
+          fi
+
+          echo "Apply succeeded"
+          exit 0
