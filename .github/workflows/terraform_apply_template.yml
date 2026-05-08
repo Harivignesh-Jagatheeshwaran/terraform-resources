@@ -48,34 +48,26 @@ jobs:
           terragrunt --version
 
       - name: Terragrunt Init
+        working-directory: ${{ matrix.folder }}
         run: |
-          terragrunt init \
-            --terragrunt-working-dir=${{ matrix.folder }} \
-            --terragrunt-non-interactive \
-            -reconfigure
+          terragrunt run \
+            --log-level debug \
+            -- init -reconfigure
 
       - name: Terragrunt Validate
+        working-directory: ${{ matrix.folder }}
         run: |
-          terragrunt validate \
-            --terragrunt-working-dir=${{ matrix.folder }} \
-            --terragrunt-non-interactive
-
-      - name: Generate Unique Plan Filename
-        id: plan-file
-        run: |
-          SAFE_NAME=$(echo "${{ matrix.folder }}" | tr '/' '-')
-          PLAN_FILE="${SAFE_NAME}.tfplan"
-          echo "plan_file=$PLAN_FILE" >> $GITHUB_OUTPUT
-          echo "Plan file: $PLAN_FILE"
+          terragrunt run \
+            --log-level debug \
+            -- validate
 
       - name: Terragrunt Plan
         id: plan
+        working-directory: ${{ matrix.folder }}
         run: |
-          terragrunt plan \
-            --terragrunt-working-dir=${{ matrix.folder }} \
-            --terragrunt-non-interactive \
-            -out=${{ steps.plan-file.outputs.plan_file }} \
-            -no-color 2>&1 | tee plan_output.txt
+          terragrunt run \
+            --log-level debug \
+            -- plan -no-color 2>&1 | tee plan_output.txt
 
           PLAN=$(cat plan_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
@@ -83,9 +75,18 @@ jobs:
           echo "EOF"          >> $GITHUB_OUTPUT
 
       - name: Terragrunt Apply
+        working-directory: ${{ matrix.folder }}
+        env:
+          TF_LOG: debug
         run: |
-          terragrunt apply \
-            --terragrunt-working-dir=${{ matrix.folder }} \
-            --terragrunt-non-interactive \
-            -no-color \
-            ${{ steps.plan-file.outputs.plan_file }} 2>&1 | tee apply_output.txt
+          terragrunt run \
+            --log-level debug \
+            --non-interactive \
+            -- apply \
+            -auto-approve \
+            -no-color 2>&1 | tee apply_output.txt
+
+          APPLY=$(cat apply_output.txt)
+          echo "output<<EOF"  >> $GITHUB_OUTPUT
+          echo "$APPLY"       >> $GITHUB_OUTPUT
+          echo "EOF"          >> $GITHUB_OUTPUT
