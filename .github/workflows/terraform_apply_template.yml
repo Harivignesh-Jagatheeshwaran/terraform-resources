@@ -38,7 +38,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.0
-          terraform_wrapper: false    # ← required for terragrunt
+          terraform_wrapper: false
 
       - name: Setup Terragrunt
         run: |
@@ -74,7 +74,7 @@ jobs:
           terragrunt plan \
             --terragrunt-working-dir=${{ matrix.folder }} \
             --terragrunt-non-interactive \
-            -out=${{ steps.plan-file.outputs.plan_file }} \
+            -out=${{ matrix.folder }}/${{ steps.plan-file.outputs.plan_file }} \
             -no-color 2>&1 | tee plan_output.txt
 
           PLAN=$(cat plan_output.txt)
@@ -88,11 +88,14 @@ jobs:
           terragrunt apply \
             --terragrunt-working-dir=${{ matrix.folder }} \
             --terragrunt-non-interactive \
-            --terragrunt-log-level debug \
             -no-color \
-            ${{ steps.plan-file.outputs.plan_file }} 2>&1 | tee apply_output.txt
+            ${{ matrix.folder }}/${{ steps.plan-file.outputs.plan_file }} 2>&1 | tee apply_output.txt
 
           APPLY=$(cat apply_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
           echo "$APPLY"       >> $GITHUB_OUTPUT
           echo "EOF"          >> $GITHUB_OUTPUT
+
+      - name: Validate Apply Succeeded
+        if: steps.apply.outcome == 'failure'
+        run: exit 1
