@@ -48,55 +48,45 @@ jobs:
           terragrunt --version
 
       - name: Terragrunt Init
+        working-directory: ${{ matrix.folder }}
         env:
           TG_NON_INTERACTIVE: "true"
           TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
-          TG_WORKING_DIR: ${{ matrix.folder }}
-        run: |
-          terragrunt init -reconfigure
+        run: terragrunt init -reconfigure
 
       - name: Terragrunt Validate
+        working-directory: ${{ matrix.folder }}
         env:
           TG_NON_INTERACTIVE: "true"
-          TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
-          TG_WORKING_DIR: ${{ matrix.folder }}
-        run: |
-          terragrunt validate
+        run: terragrunt validate
 
       - name: Terragrunt Plan
         id: plan
+        working-directory: ${{ matrix.folder }}
         env:
           TG_NON_INTERACTIVE: "true"
           TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
-          TG_WORKING_DIR: ${{ matrix.folder }}
         run: |
           terragrunt plan 2>&1 | tee plan_output.txt
-
           EXIT_CODE=${PIPESTATUS[0]}
-
           PLAN=$(cat plan_output.txt)
           echo "output<<EOF" >> $GITHUB_OUTPUT
           echo "$PLAN" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-
-          # exit 1 = error, exit 2 = changes present (not an error)
-          if [ $EXIT_CODE -eq 1 ]; then
-            exit 1
-          fi
+          if [ $EXIT_CODE -eq 1 ]; then exit 1; fi
           exit 0
 
       - name: Terragrunt Apply
+        working-directory: ${{ matrix.folder }}
         env:
           TG_NON_INTERACTIVE: "true"
           TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
-          TG_WORKING_DIR: ${{ matrix.folder }}
         run: |
           terragrunt apply -auto-approve 2>&1 | tee apply_output.txt
-
           APPLY=$(cat apply_output.txt)
           echo "output<<EOF" >> $GITHUB_OUTPUT
           echo "$APPLY" >> $GITHUB_OUTPUT
