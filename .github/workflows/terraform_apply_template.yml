@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  terraform-apply:
+  terragrunt-apply:
     name: "Apply [${{ inputs.environment }}] ${{ matrix.folder }}"
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
@@ -38,27 +38,42 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.0
+          terraform_wrapper: false    # ← required for terragrunt
 
-      - name: Terraform Init
-        run: terraform -chdir=${{ matrix.folder }} init -reconfigure
+      - name: Setup Terragrunt
+        run: |
+          curl -Lo /usr/local/bin/terragrunt \
+            https://github.com/gruntwork-io/terragrunt/releases/download/v0.67.0/terragrunt_linux_amd64
+          chmod +x /usr/local/bin/terragrunt
+          terragrunt --version
 
-      - name: Terraform Validate
-        run: terraform -chdir=${{ matrix.folder }} validate
+      - name: Terragrunt Init
+        run: |
+          terragrunt init \
+            --terragrunt-working-dir=${{ matrix.folder }} \
+            --terragrunt-non-interactive \
+            -reconfigure
+
+      - name: Terragrunt Validate
+        run: |
+          terragrunt validate \
+            --terragrunt-working-dir=${{ matrix.folder }} \
+            --terragrunt-non-interactive
 
       - name: Generate Unique Plan Filename
         id: plan-file
         run: |
-          # replace / with - to make a safe unique filename per module
-          # e.g. accounts/dev/us-east-2/vpc → accounts-dev-us-east-2-vpc.tfplan
           SAFE_NAME=$(echo "${{ matrix.folder }}" | tr '/' '-')
           PLAN_FILE="${SAFE_NAME}.tfplan"
           echo "plan_file=$PLAN_FILE" >> $GITHUB_OUTPUT
           echo "Plan file: $PLAN_FILE"
 
-      - name: Terraform Plan
+      - name: Terragrunt Plan
         id: plan
         run: |
-          terraform -chdir=${{ matrix.folder }} plan \
+          terragrunt plan \
+            --terragrunt-working-dir=${{ matrix.folder }} \
+            --terragrunt-non-interactive \
             -out=${{ steps.plan-file.outputs.plan_file }} \
             -no-color 2>&1 | tee plan_output.txt
 
@@ -66,15 +81,13 @@ jobs:
           echo "output<<EOF"  >> $GITHUB_OUTPUT
           echo "$PLAN"        >> $GITHUB_OUTPUT
           echo "EOF"          >> $GITHUB_OUTPUT
-        env:
-          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
-          TF_VAR_environment: ${{ inputs.environment }}
-          TF_VAR_aws_region:  ${{ matrix.region }}
 
-      - name: Terraform Apply
+      - name: Terragrunt Apply
         id: apply
         run: |
-          terraform -chdir=${{ matrix.folder }} apply \
+          terragrunt apply \
+            --terragrunt-working-dir=${{ matrix.folder }} \
+            --terragrunt-non-interactive \
             -no-color \
             ${{ steps.plan-file.outputs.plan_file }} 2>&1 | tee apply_output.txt
 
