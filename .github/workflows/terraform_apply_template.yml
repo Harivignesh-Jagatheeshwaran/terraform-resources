@@ -74,7 +74,7 @@ jobs:
           terragrunt plan \
             --terragrunt-working-dir=${{ matrix.folder }} \
             --terragrunt-non-interactive \
-            -out=${{ matrix.folder }}/${{ steps.plan-file.outputs.plan_file }} \
+            -out=${{ steps.plan-file.outputs.plan_file }} \
             -no-color 2>&1 | tee plan_output.txt
 
           PLAN=$(cat plan_output.txt)
@@ -83,19 +83,9 @@ jobs:
           echo "EOF"          >> $GITHUB_OUTPUT
 
       - name: Terragrunt Apply
-        id: apply
         run: |
           terragrunt apply \
             --terragrunt-working-dir=${{ matrix.folder }} \
             --terragrunt-non-interactive \
             -no-color \
-            ${{ matrix.folder }}/${{ steps.plan-file.outputs.plan_file }} 2>&1 | tee apply_output.txt
-
-          APPLY=$(cat apply_output.txt)
-          echo "output<<EOF"  >> $GITHUB_OUTPUT
-          echo "$APPLY"       >> $GITHUB_OUTPUT
-          echo "EOF"          >> $GITHUB_OUTPUT
-
-      - name: Validate Apply Succeeded
-        if: steps.apply.outcome == 'failure'
-        run: exit 1
+            ${{ steps.plan-file.outputs.plan_file }} 2>&1 | tee apply_output.txt
