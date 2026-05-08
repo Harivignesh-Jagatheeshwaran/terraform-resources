@@ -4,6 +4,7 @@ include "root" {
   path = find_in_parent_folders()
 }
 
+
 inputs = {
   cluster_name    = "dev-ecommerce-eks"
   cluster_version = "1.29"

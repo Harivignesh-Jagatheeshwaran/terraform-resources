@@ -11,11 +11,10 @@ on:
 permissions:
   id-token: write
   contents: read
-  pull-requests: write
 
 jobs:
-  terragrunt-plan:
-    name: "Plan [${{ inputs.environment }}] ${{ matrix.folder }}"
+  terragrunt-apply:
+    name: "Apply [${{ inputs.environment }}] ${{ matrix.folder }}"
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
 
@@ -39,7 +38,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.0
-          terraform_wrapper: false    # ← required for terragrunt
+          terraform_wrapper: false
 
       - name: Setup Terragrunt
         run: |
@@ -53,6 +52,7 @@ jobs:
           terragrunt init \
             --terragrunt-working-dir=${{ matrix.folder }} \
             --terragrunt-non-interactive \
+            --log-level debug \
             -reconfigure
 
       - name: Terragrunt Validate
@@ -61,76 +61,40 @@ jobs:
             --terragrunt-working-dir=${{ matrix.folder }} \
             --terragrunt-non-interactive
 
+      - name: Generate Unique Plan Filename
+        id: plan-file
+        run: |
+          SAFE_NAME=$(echo "${{ matrix.folder }}" | tr '/' '-')
+          PLAN_FILE="${SAFE_NAME}.tfplan"
+          echo "plan_file=$PLAN_FILE" >> $GITHUB_OUTPUT
+          echo "Plan file: $PLAN_FILE"
+
       - name: Terragrunt Plan
         id: plan
         run: |
           terragrunt plan \
             --terragrunt-working-dir=${{ matrix.folder }} \
             --terragrunt-non-interactive \
+            --log-level debug \
+            -out=${{ steps.plan-file.outputs.plan_file }} \
             -no-color 2>&1 | tee plan_output.txt
 
           PLAN=$(cat plan_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
           echo "$PLAN"        >> $GITHUB_OUTPUT
           echo "EOF"          >> $GITHUB_OUTPUT
-        continue-on-error: true
 
-      - name: Publish Plan Results to Pull Request
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const folder      = "${{ matrix.folder }}";
-            const environment = "${{ inputs.environment }}";
-            const region      = "${{ matrix.region }}";
-            const plan        = `${{ steps.plan.outputs.output }}`;
-            const status      = "${{ steps.plan.outcome }}" === "success" ? "✅" : "❌";
+      - name: Terragrunt Apply
+        run: |
+          terragrunt apply \
+            --terragrunt-working-dir=${{ matrix.folder }} \
+            --terragrunt-non-interactive \
+            --log-level debug \
+            -auto-approve \
+            -no-color \
+            ${{ steps.plan-file.outputs.plan_file }} 2>&1 | tee apply_output.txt
 
-            const body = `
-            ### ${status} Terragrunt Plan — \`${folder}\`
-
-            | | |
-            |---|---|
-            | **Environment** | \`${environment}\` |
-            | **Region**      | \`${region}\` |
-            | **Folder**      | \`${folder}\` |
-
-            <details>
-            <summary>Click to expand plan output</summary>
-
-            \`\`\`hcl
-            ${plan}
-            \`\`\`
-
-            </details>
-            `;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              issue_number: context.issue.number,
-              owner:        context.repo.owner,
-              repo:         context.repo.repo,
-            });
-
-            const existing = comments.find(c =>
-              c.user.login === "github-actions[bot]" &&
-              c.body.includes(`Terragrunt Plan — \`${folder}\``)
-            );
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                comment_id: existing.id,
-                owner:      context.repo.owner,
-                repo:       context.repo.repo,
-                body:       body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner:        context.repo.owner,
-                repo:         context.repo.repo,
-                body:         body
-              });
-            }
-
-      - name: Validate Plan Succeeded
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
+          APPLY=$(cat apply_output.txt)
+          echo "output<<EOF"  >> $GITHUB_OUTPUT
+          echo "$APPLY"       >> $GITHUB_OUTPUT
+          echo "EOF"          >> $GITHUB_OUTPUT
