@@ -49,45 +49,48 @@ jobs:
 
       - name: Terragrunt Init
         working-directory: ${{ matrix.folder }}
+        env:
+          TG_LOG: debug
         run: |
           terragrunt init \
             --terragrunt-non-interactive \
-            --log-level debug \
             -reconfigure
 
       - name: Terragrunt Validate
         working-directory: ${{ matrix.folder }}
+        env:
+          TG_LOG: debug
         run: |
           terragrunt validate \
-            --terragrunt-non-interactive \
-            --log-level debug
+            --terragrunt-non-interactive
 
       - name: Terragrunt Plan
         id: plan
         working-directory: ${{ matrix.folder }}
+        env:
+          TG_LOG: debug
         run: |
           terragrunt plan \
             --terragrunt-non-interactive \
-            --log-level debug \
             -no-color 2>&1 | tee plan_output.txt
 
           PLAN=$(cat plan_output.txt)
-          echo "output<<EOF"  >> $GITHUB_OUTPUT
-          echo "$PLAN"        >> $GITHUB_OUTPUT
-          echo "EOF"          >> $GITHUB_OUTPUT
+          echo "output<<EOF" >> $GITHUB_OUTPUT
+          echo "$PLAN" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Terragrunt Apply
         working-directory: ${{ matrix.folder }}
         env:
+          TG_LOG: debug
           TF_LOG: ERROR
         run: |
           terragrunt apply \
             --terragrunt-non-interactive \
-            --log-level debug \
             -auto-approve \
             -no-color 2>&1 | tee apply_output.txt
 
           APPLY=$(cat apply_output.txt)
-          echo "output<<EOF"  >> $GITHUB_OUTPUT
-          echo "$APPLY"       >> $GITHUB_OUTPUT
-          echo "EOF"          >> $GITHUB_OUTPUT
+          echo "output<<EOF" >> $GITHUB_OUTPUT
+          echo "$APPLY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
