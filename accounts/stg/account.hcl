@@ -1,4 +1,4 @@
 # accounts/dev/account.hcl
 locals {
-  environment = "stg"
+  environment = "stage"
 }
