@@ -3,7 +3,7 @@ run-name: "Terraform Apply — ${{ github.sha }} by @${{ github.actor }}"
 
 on:
   push:
-    branches: [feature_dev]
+    branches: [main]
     paths:
       - 'accounts/**'
 

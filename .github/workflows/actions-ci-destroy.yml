@@ -283,6 +283,12 @@ jobs:
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
+          # Capture the cache dir where tfplan was written so the destroy
+          # step can call terraform directly, bypassing Terragrunt's -var
+          # injection which Terraform 1.10 rejects on saved plans.
+          CACHE_DIR=$(find .terragrunt-cache -name "tfplan" ! -path "*/.terraform/*" 2>/dev/null | head -1 | xargs -I{} dirname {})
+          echo "cache_dir=$CACHE_DIR" >> $GITHUB_OUTPUT
+
           PLAN=$(cat plan_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
           echo "$PLAN"        >> $GITHUB_OUTPUT
@@ -291,17 +297,15 @@ jobs:
           if [ $EXIT_CODE -eq 1 ]; then exit 1; fi
           exit 0
 
-      - name: Terragrunt Destroy (saved plan)
+      - name: Terraform Destroy (saved plan)
         id: destroy
         working-directory: ${{ needs.validate-destroy-request.outputs.folder }}
-        env:
-          TG_NON_INTERACTIVE: "true"
-          TG_NO_COLOR: "true"
         run: |
-          # Unset TF_VAR_* so Terraform 1.10 does not reject variable overrides
-          # when applying a saved plan that already has values baked in.
-          unset $(env | grep '^TF_VAR_' | cut -d= -f1) 2>/dev/null || true
-          terragrunt apply -auto-approve -no-color tfplan 2>&1 | tee destroy_output.txt
+          # Apply directly via terraform (not terragrunt) to avoid Terragrunt
+          # re-injecting -var flags, which Terraform 1.10 rejects when a saved
+          # plan already has variable values baked in.
+          cd "${{ steps.plan.outputs.cache_dir }}"
+          terraform apply -auto-approve -no-color tfplan 2>&1 | tee destroy_output.txt
 
           DESTROY=$(cat destroy_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
