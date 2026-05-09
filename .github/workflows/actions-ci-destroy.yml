@@ -170,36 +170,37 @@ jobs:
       - name: Publish Destroy Plan for Review
         if: always()
         uses: actions/github-script@v6
+        env:
+          PLAN_OUTPUT: ${{ steps.plan.outputs.output }}
         with:
           script: |
             const folder     = "${{ needs.validate-destroy-request.outputs.folder }}";
-            const planOut    = `${{ steps.plan.outputs.output }}`;
+            const planOut    = process.env.PLAN_OUTPUT || '';
             const planStatus = "${{ steps.plan.outcome }}";
-            const status     = planStatus === "success" ? "✅" : "❌";
+            const status     = planStatus === "success" ? "\u2705" : "\u274c";
 
-            const summary = `
-            ## ${status} Destroy Plan — \`${folder}\`
-
-            > ⚠️ **REVIEW CAREFULLY — These resources will be permanently deleted.**
-            > A second approval is required before destruction proceeds.
-
-            | | |
-            |---|---|
-            | **Environment**  | \`${{ inputs.environment }}\` |
-            | **Region**       | \`${{ inputs.region }}\` |
-            | **Module**       | \`${{ inputs.module }}\` |
-            | **Triggered by** | \`${{ github.actor }}\` |
-            | **Plan status**  | ${status} \`${planStatus}\` |
-
-            <details>
-            <summary>📋 Full Destroy Plan Output</summary>
-
-            \`\`\`hcl
-            ${planOut}
-            \`\`\`
-
-            </details>
-            `;
+            const summary = [
+              `## ${status} Destroy Plan — \`${folder}\``,
+              ``,
+              `> \u26a0\ufe0f **REVIEW CAREFULLY \u2014 These resources will be permanently deleted.**`,
+              `> A second approval is required before destruction proceeds.`,
+              ``,
+              `| | |`,
+              `|---|---|`,
+              `| **Environment**  | \`${{ inputs.environment }}\` |`,
+              `| **Region**       | \`${{ inputs.region }}\` |`,
+              `| **Module**       | \`${{ inputs.module }}\` |`,
+              `| **Triggered by** | \`${{ github.actor }}\` |`,
+              `| **Plan status**  | ${status} \`${planStatus}\` |`,
+              ``,
+              `<details>`,
+              `<summary>\ud83d\udccb Full Destroy Plan Output</summary>`,
+              ``,
+              `\`\`\``,
+              planOut,
+              `\`\`\``,
+              `</details>`,
+            ].join('\n');
 
             await core.summary
               .addRaw(summary)
@@ -311,47 +312,48 @@ jobs:
       - name: Publish Destroy Results
         if: always()
         uses: actions/github-script@v6
+        env:
+          PLAN_OUTPUT:    ${{ steps.plan.outputs.output }}
+          DESTROY_OUTPUT: ${{ steps.destroy.outputs.output }}
         with:
           script: |
             const folder     = "${{ needs.validate-destroy-request.outputs.folder }}";
-            const planOut    = `${{ steps.plan.outputs.output }}`;
-            const destroyOut = `${{ steps.destroy.outputs.output }}`;
+            const planOut    = process.env.PLAN_OUTPUT    || '';
+            const destroyOut = process.env.DESTROY_OUTPUT || '';
             const destStatus = "${{ steps.destroy.outcome }}";
             const status     = destStatus === "success"
-              ? "✅ Infrastructure Successfully Destroyed"
-              : "❌ Destroy Execution Failed";
+              ? "\u2705 Infrastructure Successfully Destroyed"
+              : "\u274c Destroy Execution Failed";
 
-            const summary = `
-            ## ${status}
-
-            ### 💣 Terraform Destroy — \`${folder}\`
-
-            | | |
-            |---|---|
-            | **Environment**    | \`${{ inputs.environment }}\` |
-            | **Region**         | \`${{ inputs.region }}\` |
-            | **Module**         | \`${{ inputs.module }}\` |
-            | **Triggered by**   | \`${{ github.actor }}\` |
-            | **Destroy status** | ${destStatus === "success" ? "✅" : "❌"} \`${destStatus}\` |
-
-            <details>
-            <summary>📋 Plan Output</summary>
-
-            \`\`\`hcl
-            ${planOut}
-            \`\`\`
-
-            </details>
-
-            <details>
-            <summary>💣 Destroy Output</summary>
-
-            \`\`\`hcl
-            ${destroyOut}
-            \`\`\`
-
-            </details>
-            `;
+            const summary = [
+              `## ${status}`,
+              ``,
+              `### \ud83d\udca3 Terraform Destroy \u2014 \`${folder}\``,
+              ``,
+              `| | |`,
+              `|---|---|`,
+              `| **Environment**    | \`${{ inputs.environment }}\` |`,
+              `| **Region**         | \`${{ inputs.region }}\` |`,
+              `| **Module**         | \`${{ inputs.module }}\` |`,
+              `| **Triggered by**   | \`${{ github.actor }}\` |`,
+              `| **Destroy status** | ${destStatus === "success" ? "\u2705" : "\u274c"} \`${destStatus}\` |`,
+              ``,
+              `<details>`,
+              `<summary>\ud83d\udccb Plan Output</summary>`,
+              ``,
+              `\`\`\``,
+              planOut,
+              `\`\`\``,
+              `</details>`,
+              ``,
+              `<details>`,
+              `<summary>\ud83d\udca3 Destroy Output</summary>`,
+              ``,
+              `\`\`\``,
+              destroyOut,
+              `\`\`\``,
+              `</details>`,
+            ].join('\n');
 
             await core.summary
               .addRaw(summary)
