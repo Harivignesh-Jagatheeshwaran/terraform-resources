@@ -78,7 +78,7 @@ jobs:
             echo ""
             echo "Available modules under accounts/${{ inputs.environment }}/${{ inputs.region }}:"
             find "accounts/${{ inputs.environment }}/${{ inputs.region }}" \
-              -name "main.tf" \
+              -name "terragrunt.hcl" \
               | xargs -I {} dirname {} \
               | sed "s|accounts/${{ inputs.environment }}/${{ inputs.region }}/||" \
               | sort \
@@ -86,8 +86,8 @@ jobs:
             exit 1
           fi
 
-          if [[ ! -f "$FOLDER/main.tf" ]]; then
-            echo "❌ ERROR: $FOLDER is not a valid Terraform module (main.tf not found)"
+          if [[ ! -f "$FOLDER/terragrunt.hcl" ]]; then
+            echo "❌ ERROR: $FOLDER is not a valid Terragrunt module (terragrunt.hcl not found)"
             exit 1
           fi
 
@@ -117,19 +117,40 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.0
+          terraform_wrapper: false
 
-      - name: Terraform Init
-        run: terraform -chdir=${{ needs.validate-destroy-request.outputs.folder }} init -reconfigure
-
-      - name: Terraform Validate
-        run: terraform -chdir=${{ needs.validate-destroy-request.outputs.folder }} validate
-
-      - name: Terraform Plan Destroy
-        id: plan
+      - name: Setup Terragrunt
         run: |
-          terraform -chdir=${{ needs.validate-destroy-request.outputs.folder }} plan \
-            -destroy \
-            -no-color 2>&1 | tee plan_output.txt
+          curl -Lo /usr/local/bin/terragrunt \
+            https://github.com/gruntwork-io/terragrunt/releases/latest/download/terragrunt_linux_amd64
+          chmod +x /usr/local/bin/terragrunt
+          terragrunt --version
+
+      - name: Terragrunt Init
+        working-directory: ${{ needs.validate-destroy-request.outputs.folder }}
+        env:
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+        run: terragrunt init -reconfigure
+
+      - name: Terragrunt Validate
+        working-directory: ${{ needs.validate-destroy-request.outputs.folder }}
+        env:
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+        run: terragrunt validate
+
+      - name: Terragrunt Plan Destroy
+        id: plan
+        working-directory: ${{ needs.validate-destroy-request.outputs.folder }}
+        env:
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+        run: |
+          set +e
+          terragrunt plan -destroy -no-color 2>&1 | tee plan_output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
 
           echo ""
           echo "=================================================="
@@ -141,10 +162,9 @@ jobs:
           echo "output<<EOF"  >> $GITHUB_OUTPUT
           echo "$PLAN"        >> $GITHUB_OUTPUT
           echo "EOF"          >> $GITHUB_OUTPUT
-        env:
-          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
-          TF_VAR_environment: ${{ inputs.environment }}
-          TF_VAR_aws_region:  ${{ inputs.region }}
+
+          if [ $EXIT_CODE -eq 1 ]; then exit 1; fi
+          exit 0
         continue-on-error: true
 
       - name: Publish Destroy Plan for Review
@@ -227,45 +247,65 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.0
+          terraform_wrapper: false
 
-      - name: Terraform Init
-        run: terraform -chdir=${{ needs.validate-destroy-request.outputs.folder }} init -reconfigure
-
-      - name: Terraform Validate
-        run: terraform -chdir=${{ needs.validate-destroy-request.outputs.folder }} validate
-
-      - name: Terraform Plan Destroy
-        id: plan
+      - name: Setup Terragrunt
         run: |
-          terraform -chdir=${{ needs.validate-destroy-request.outputs.folder }} plan \
-            -destroy \
-            -out=tfplan.binary \
-            -no-color 2>&1 | tee plan_output.txt
+          curl -Lo /usr/local/bin/terragrunt \
+            https://github.com/gruntwork-io/terragrunt/releases/latest/download/terragrunt_linux_amd64
+          chmod +x /usr/local/bin/terragrunt
+          terragrunt --version
+
+      - name: Terragrunt Init
+        working-directory: ${{ needs.validate-destroy-request.outputs.folder }}
+        env:
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+        run: terragrunt init -reconfigure
+
+      - name: Terragrunt Validate
+        working-directory: ${{ needs.validate-destroy-request.outputs.folder }}
+        env:
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+        run: terragrunt validate
+
+      - name: Terragrunt Plan Destroy
+        id: plan
+        working-directory: ${{ needs.validate-destroy-request.outputs.folder }}
+        env:
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
+        run: |
+          set +e
+          terragrunt plan -destroy -out=tfplan -no-color 2>&1 | tee plan_output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
 
           PLAN=$(cat plan_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
           echo "$PLAN"        >> $GITHUB_OUTPUT
           echo "EOF"          >> $GITHUB_OUTPUT
-        env:
-          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
-          TF_VAR_environment: ${{ inputs.environment }}
-          TF_VAR_aws_region:  ${{ inputs.region }}
 
-      - name: Terraform Destroy
+          if [ $EXIT_CODE -eq 1 ]; then exit 1; fi
+          exit 0
+
+      - name: Terragrunt Destroy (saved plan)
         id: destroy
+        working-directory: ${{ needs.validate-destroy-request.outputs.folder }}
+        env:
+          TG_NON_INTERACTIVE: "true"
+          TG_NO_COLOR: "true"
         run: |
-          terraform -chdir=${{ needs.validate-destroy-request.outputs.folder }} apply \
-            -no-color \
-            tfplan.binary 2>&1 | tee destroy_output.txt
+          # Unset TF_VAR_* so Terraform 1.10 does not reject variable overrides
+          # when applying a saved plan that already has values baked in.
+          unset $(env | grep '^TF_VAR_' | cut -d= -f1) 2>/dev/null || true
+          terragrunt apply -auto-approve -no-color tfplan 2>&1 | tee destroy_output.txt
 
           DESTROY=$(cat destroy_output.txt)
           echo "output<<EOF"  >> $GITHUB_OUTPUT
           echo "$DESTROY"     >> $GITHUB_OUTPUT
           echo "EOF"          >> $GITHUB_OUTPUT
-        env:
-          TF_VAR_role_arn:    ${{ secrets.AWS_IAM_ROLE_ARN }}
-          TF_VAR_environment: ${{ inputs.environment }}
-          TF_VAR_aws_region:  ${{ inputs.region }}
         continue-on-error: true
 
       - name: Publish Destroy Results
