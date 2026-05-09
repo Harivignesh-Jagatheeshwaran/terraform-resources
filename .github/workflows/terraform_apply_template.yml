@@ -95,7 +95,7 @@ jobs:
           TG_NON_INTERACTIVE: "true"
           TG_NO_COLOR: "true"
         run: |
-          terragrunt apply -auto-approve 2>&1 | tee apply_output.txt
+          terragrunt apply -auto-approve --log-level debug 2>&1 | tee apply_output.txt
 
           APPLY=$(cat apply_output.txt)
           echo "output<<EOF" >> $GITHUB_OUTPUT

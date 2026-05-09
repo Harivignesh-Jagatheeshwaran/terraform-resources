@@ -9,6 +9,7 @@ terraform {
   source = "${get_repo_root()}/modules/vpc"    # ← absolute path using terragrunt function
 }
 
+
 inputs = {
   vpc_name = "dev-ecommerce-vpc"
   vpc_cidr = "10.0.0.0/16"
