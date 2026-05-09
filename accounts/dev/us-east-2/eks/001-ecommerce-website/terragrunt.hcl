@@ -13,11 +13,18 @@ inputs = {
   cluster_version = "1.30"
 
   vpc_id     = "vpc-0cfed083738963b86"
+
   subnet_ids = [
     "subnet-0cbc563adce5287a3",
     "subnet-06fbd5601c599131e",
     "subnet-0d4999b9f72f13e45",
     "subnet-00816edaf89e070ce"
+  ]
+
+  # private subnets only for nodes
+  node_subnet_ids = [
+    "subnet-0cbc563adce5287a3",    # private only
+    "subnet-06fbd5601c599131e"     # private only
   ]
 
   node_groups = {
@@ -36,7 +43,7 @@ inputs = {
     }
 
     spot = {
-      instance_types = ["t3.medium", "t3.large"]
+      instance_types = ["t3.medium", "t2.micro"]
       capacity_type  = "SPOT"
       ami_type       = "AL2023_x86_64_STANDARD"
       min_size       = 0

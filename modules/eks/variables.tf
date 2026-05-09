@@ -19,6 +19,12 @@ variable "subnet_ids" {
   type        = list(string)
 }
 
+variable "node_subnet_ids" {
+  description = "Private subnet IDs for node groups"
+  type        = list(string)
+  default     = []
+}
+
 variable "cluster_endpoint_public_access" {
   description = "Whether the EKS API server endpoint is publicly accessible"
   type        = bool
