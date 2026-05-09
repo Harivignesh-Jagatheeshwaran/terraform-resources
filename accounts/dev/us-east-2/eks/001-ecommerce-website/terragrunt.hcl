@@ -5,19 +5,48 @@ include "root" {
 }
 
 terraform {
-  source = "${get_repo_root()}/modules/eks"    # ← absolute path using terragrunt function
+  source = "${get_repo_root()}/modules/eks"
 }
-
 
 inputs = {
   cluster_name    = "dev-ecommerce-eks-001"
   cluster_version = "1.30"
 
-  # pass directly — no dependency on vpc module
   vpc_id     = "vpc-0cfed083738963b86"
-  subnet_ids = ["subnet-0cbc563adce5287a3", "subnet-06fbd5601c599131e", "subnet-0d4999b9f72f13e45", "subnet-00816edaf89e070ce"]
+  subnet_ids = [
+    "subnet-0cbc563adce5287a3",
+    "subnet-06fbd5601c599131e",
+    "subnet-0d4999b9f72f13e45",
+    "subnet-00816edaf89e070ce"
+  ]
 
-  node_group_name             = "dev-ecommerce-nodes-001"
-  node_group_instance_types   = ["t3.medium"]
-  node_group_desired_capacity = 2
+  node_groups = {
+    general = {
+      instance_types = ["t3.medium"]
+      capacity_type  = "ON_DEMAND"
+      ami_type       = "AL2023_x86_64_STANDARD"
+      min_size       = 1
+      max_size       = 3
+      desired_size   = 1
+      disk_size_gb   = 20
+      labels         = {
+        role = "general"
+      }
+      taints         = []
+    }
+
+    spot = {
+      instance_types = ["t3.medium", "t3.large"]
+      capacity_type  = "SPOT"
+      ami_type       = "AL2023_x86_64_STANDARD"
+      min_size       = 0
+      max_size       = 5
+      desired_size   = 0
+      disk_size_gb   = 20
+      labels         = {
+        role = "spot"
+      }
+      taints         = []
+    }
+  }
 }
