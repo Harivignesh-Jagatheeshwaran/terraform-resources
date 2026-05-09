@@ -76,7 +76,7 @@ jobs:
           TG_NO_COLOR: "true"
         run: |
           set +e
-          terragrunt plan 2>&1 | tee plan_output.txt
+          terragrunt plan -out=tfplan 2>&1 | tee plan_output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
@@ -85,17 +85,21 @@ jobs:
           echo "$PLAN" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-          # exit 2 = changes present = not an error
+          # Locate the cache directory where tfplan was written
+          CACHE_DIR=$(find .terragrunt-cache -name "tfplan" ! -path "*/.terraform/*" | head -1 | xargs -I{} dirname {})
+          echo "cache_dir=$CACHE_DIR" >> $GITHUB_OUTPUT
+
           if [ $EXIT_CODE -eq 1 ]; then exit 1; fi
           exit 0
 
-      - name: Terragrunt Apply
+      - name: Terraform Apply (saved plan)
         working-directory: ${{ matrix.folder }}
-        env:
-          TG_NON_INTERACTIVE: "true"
-          TG_NO_COLOR: "true"
         run: |
-          terragrunt apply -auto-approve --log-level debug 2>&1 | tee apply_output.txt
+          # Apply the saved plan directly via terraform to avoid Terragrunt
+          # re-injecting TF_VAR_* variables, which Terraform 1.10 rejects
+          # when a saved plan already contains baked-in variable values.
+          cd "${{ steps.plan.outputs.cache_dir }}"
+          terraform apply -auto-approve -no-color tfplan 2>&1 | tee apply_output.txt
 
           APPLY=$(cat apply_output.txt)
           echo "output<<EOF" >> $GITHUB_OUTPUT
