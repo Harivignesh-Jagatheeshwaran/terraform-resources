@@ -85,33 +85,33 @@ jobs:
 
       - name: Publish Plan Results to Pull Request
         uses: actions/github-script@v6
+        env:
+          PLAN_OUTPUT: ${{ steps.plan.outputs.output }}
         with:
           script: |
             const folder      = "${{ matrix.folder }}";
             const environment = "${{ inputs.environment }}";
             const region      = "${{ matrix.region }}";
-            const plan        = `${{ steps.plan.outputs.output }}`;
+            const plan        = process.env.PLAN_OUTPUT || '';
             const status      = "${{ steps.plan.outcome }}" === "success" ? "✅" : "❌";
 
-            const body = `
-            ### ${status} Terragrunt Plan — \`${folder}\`
-
-
-            | | |
-            |---|---|
-            | **Environment** | \`${environment}\` |
-            | **Region**      | \`${region}\` |
-            | **Folder**      | \`${folder}\` |
-
-            <details>
-            <summary>Click to expand plan output</summary>
-
-            \`\`\`hcl
-            ${plan}
-            \`\`\`
-
-            </details>
-            `;
+            const body = [
+              `### ${status} Terragrunt Plan — \`${folder}\``,
+              ``,
+              `| | |`,
+              `|---|---|`,
+              `| **Environment** | \`${environment}\` |`,
+              `| **Region**      | \`${region}\` |`,
+              `| **Folder**      | \`${folder}\` |`,
+              ``,
+              `<details>`,
+              `<summary>Click to expand plan output</summary>`,
+              ``,
+              `\`\`\``,
+              plan,
+              `\`\`\``,
+              `</details>`,
+            ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
               issue_number: context.issue.number,
