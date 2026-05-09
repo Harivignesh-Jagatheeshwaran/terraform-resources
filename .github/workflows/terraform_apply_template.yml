@@ -51,7 +51,9 @@ jobs:
         working-directory: ${{ matrix.folder }}
         run: |
           rm -rf .terragrunt-cache
-          
+          find . -name "*.tfplan" -delete 2>/dev/null || true
+          find . -name "tfplan" -delete 2>/dev/null || true
+
       - name: Terragrunt Init
         working-directory: ${{ matrix.folder }}
         env:
