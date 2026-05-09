@@ -1,5 +1,4 @@
 # accounts/dev/us-east-2/vpc/terragrunt.hcl
-
 include "root" {
   path = find_in_parent_folders()
 }
