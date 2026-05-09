@@ -43,59 +43,62 @@ jobs:
       - name: Setup Terragrunt
         run: |
           curl -Lo /usr/local/bin/terragrunt \
-            https://github.com/gruntwork-io/terragrunt/releases/download/v0.67.0/terragrunt_linux_amd64
+            https://github.com/gruntwork-io/terragrunt/releases/latest/download/terragrunt_linux_amd64
           chmod +x /usr/local/bin/terragrunt
           terragrunt --version
 
+      - name: Clear Terragrunt Cache
+        working-directory: ${{ matrix.folder }}
+        run: |
+          rm -rf .terragrunt-cache
+          find . -name "*.tfplan" -delete 2>/dev/null || true
+          find . -name "tfplan" -delete 2>/dev/null || true
+
       - name: Terragrunt Init
+        working-directory: ${{ matrix.folder }}
         env:
           TG_NON_INTERACTIVE: "true"
-          TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
-          TG_WORKING_DIR: ${{ matrix.folder }}
-        run: |
-          terragrunt init -reconfigure
+        run: terragrunt init -reconfigure
 
       - name: Terragrunt Validate
+        working-directory: ${{ matrix.folder }}
         env:
           TG_NON_INTERACTIVE: "true"
-          TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
-          TG_WORKING_DIR: ${{ matrix.folder }}
-        run: |
-          terragrunt validate
+        run: terragrunt validate
 
       - name: Terragrunt Plan
         id: plan
+        working-directory: ${{ matrix.folder }}
         env:
           TG_NON_INTERACTIVE: "true"
-          TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
-          TG_WORKING_DIR: ${{ matrix.folder }}
         run: |
-          terragrunt plan 2>&1 | tee plan_output.txt
-
+          set +e
+          terragrunt plan -out=tfplan -no-color 2>&1 | tee plan_output.txt
           EXIT_CODE=${PIPESTATUS[0]}
+          set -e
 
           PLAN=$(cat plan_output.txt)
           echo "output<<EOF" >> $GITHUB_OUTPUT
           echo "$PLAN" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-          # exit 1 = error, exit 2 = changes present (not an error)
-          if [ $EXIT_CODE -eq 1 ]; then
-            exit 1
-          fi
+          if [ $EXIT_CODE -eq 1 ]; then exit 1; fi
           exit 0
 
-      - name: Terragrunt Apply
+      - name: Terragrunt Apply (saved plan)
+        working-directory: ${{ matrix.folder }}
         env:
           TG_NON_INTERACTIVE: "true"
-          TG_LOG_LEVEL: debug
           TG_NO_COLOR: "true"
-          TG_WORKING_DIR: ${{ matrix.folder }}
         run: |
-          terragrunt apply -auto-approve 2>&1 | tee apply_output.txt
+          # Unset all TF_VAR_* env vars so Terraform 1.10 does not reject
+          # variable overrides when applying a saved plan that already has
+          # variable values baked in. Terragrunt hooks/dependencies still run.
+          unset $(env | grep '^TF_VAR_' | cut -d= -f1) 2>/dev/null || true
+          terragrunt apply -auto-approve -no-color tfplan 2>&1 | tee apply_output.txt
 
           APPLY=$(cat apply_output.txt)
           echo "output<<EOF" >> $GITHUB_OUTPUT
